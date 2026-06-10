@@ -21,17 +21,19 @@ underlyings:
     strike_step: 50
 
 risk:
-  # Higher risk/reward profile chosen by the account owner (2026-06-10), kept
-  # inside Varsity Module 9/10 position-sizing bounds: per-trade risk well
-  # under the ~5% outer limit, hard daily kill switch, defined-risk only.
-  max_risk_per_trade_pct: 4.5   # max planned loss per trade, % of capital
-  max_daily_loss_pct: 7.5       # kill switch: stop trading for the day
+  # Baseline profile, kept after A/B simulation on 2026-06-10: on identical
+  # 6-week data the aggressive variant (4.5%/7.5%, target 80, 45-min entry
+  # cooldown) returned -8.4% PF 0.83 vs this baseline's +7.1% PF 1.19.
+  # Varsity principle applied: size by evidence, not appetite. Re-test with
+  # the monthly simulation before changing these.
+  max_risk_per_trade_pct: 3.0   # max planned loss per trade, % of capital
+  max_daily_loss_pct: 5.0       # kill switch: stop trading for the day
   max_open_positions: 2
-  max_trades_per_day: 4
-  entry_cooldown_minutes: 45    # no fresh entry within this window of the last
-                                # one (kills duplicate twin entries + churn)
+  max_trades_per_day: 3
+  entry_cooldown_minutes: 0     # off: cooldown cut pyramided trend winners in
+                                # testing; feature retained for future A/Bs
   stop_loss_premium_pct: 30     # long options: exit if premium drops 30%
-  target_premium_pct: 80        # let winners run further; trail locks gains
+  target_premium_pct: 60        # book at +60% of premium paid
   trail_after_r: 1.0            # start trailing once 1R in profit
   trail_lock_r: 0.5             # lock in 0.5R once trailing starts
   credit_profit_take_pct: 50    # credit spreads: buy back at 50% of max profit
