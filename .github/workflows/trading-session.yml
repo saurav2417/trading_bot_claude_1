@@ -1,0 +1,107 @@
+name: trading-session
+
+# Two sessions per trading day (GitHub Actions cron is UTC; IST = UTC+5:30).
+# Morning  09:20-12:30 IST, afternoon 12:25-15:50 IST. The afternoon run
+# queues behind the morning one (concurrency group) and resumes monitoring
+# any open positions from the journal restored off the bot-state branch.
+#
+# NOTE: GitHub's scheduler can delay cron fires by several minutes. That is
+# acceptable for recommend/paper mode. If you go live with real money,
+# prefer an always-on host (see README) — a delayed start means positions
+# are unmonitored for that long.
+on:
+  schedule:
+    - cron: "50 3 * * 1-5"   # 09:20 IST
+    - cron: "55 6 * * 1-5"   # 12:25 IST
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "trading mode"
+        type: choice
+        options: [recommend, paper, live]
+        default: paper
+      until:
+        description: "stop at IST time HH:MM (default: session end)"
+        required: false
+
+concurrency:
+  group: trading-session
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  session:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Restore journal/state from bot-state branch
+        run: |
+          mkdir -p data reports
+          if git fetch origin bot-state 2>/dev/null; then
+            git checkout origin/bot-state -- data reports 2>/dev/null || true
+            echo "state restored"
+          else
+            echo "no prior state (first run)"
+          fi
+
+      - name: Decide session end time
+        id: session
+        run: |
+          UNTIL="${{ inputs.until }}"
+          if [ -z "$UNTIL" ]; then
+            # before 06:00 UTC => morning session, else afternoon
+            if [ "$(date -u +%H)" -lt 6 ]; then UNTIL="12:30"; else UNTIL="15:50"; fi
+          fi
+          echo "until=$UNTIL" >> "$GITHUB_OUTPUT"
+          echo "session ends at $UNTIL IST"
+
+      - name: Run trading session
+        env:
+          DHAN_CLIENT_ID: ${{ secrets.DHAN_CLIENT_ID }}
+          DHAN_ACCESS_TOKEN: ${{ secrets.DHAN_ACCESS_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TRADEBOT_MODE: ${{ inputs.mode || vars.TRADEBOT_MODE || 'paper' }}
+          PYTHONPATH: src
+          PYTHONUNBUFFERED: "1"
+        run: python -m tradebot.cli run --until "${{ steps.session.outputs.until }}"
+
+      - name: Persist journal/state to bot-state branch
+        if: always()
+        run: |
+          set -e
+          cp data/tradebot.db /tmp/tradebot.db 2>/dev/null || exit 0
+          cp -r reports /tmp/reports 2>/dev/null || true
+          git config user.name "tradebot"
+          git config user.email "tradebot@users.noreply.github.com"
+          if git fetch origin bot-state 2>/dev/null; then
+            git checkout -B bot-state origin/bot-state
+          else
+            git checkout --orphan bot-state
+            git rm -rf -q . || true
+          fi
+          mkdir -p data reports
+          cp /tmp/tradebot.db data/
+          cp /tmp/reports/*.md reports/ 2>/dev/null || true
+          git add -f data/tradebot.db reports
+          git commit -m "bot state $(date -u +%FT%TZ)" || echo "no state change"
+          git push -u origin bot-state
+
+      - name: Upload reports as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-${{ github.run_id }}
+          path: reports/
+          if-no-files-found: ignore

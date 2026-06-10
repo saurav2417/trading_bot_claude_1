@@ -69,8 +69,36 @@ Switch via `mode:` in `config/settings.yaml` or `TRADEBOT_MODE=live`.
 
 ## Running it hands-free
 
-- **systemd** (recommended): `scripts/systemd/tradebot.service`
+### Option A — GitHub Actions (no server needed)
+
+The repo ships with `.github/workflows/trading-session.yml`, which runs the
+bot entirely on GitHub's cloud:
+
+1. **Add secrets** (repo → Settings → Secrets and variables → Actions →
+   *New repository secret*): `DHAN_CLIENT_ID`, `DHAN_ACCESS_TOKEN`, and
+   optionally `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID`.
+2. **Set the mode** (optional): repo → Settings → Secrets and variables →
+   Actions → *Variables* → add `TRADEBOT_MODE` = `recommend`/`paper`/`live`
+   (defaults to `paper`).
+3. That's it. Every trading day two scheduled jobs run — **09:20–12:30 IST**
+   and **12:25–15:50 IST** (GitHub caps a job at 6 h, so the session is
+   split; the afternoon job queues behind the morning one and picks up open
+   positions from the journal). State (trade journal + reports) persists on
+   the **`bot-state` branch**, and each run also uploads reports as an
+   artifact. You can trigger a session manually from the Actions tab
+   (*Run workflow*), including a one-off `recommend` run.
+
+**Caveat for live mode:** GitHub's cron scheduler can fire several minutes
+late and (rarely) skip a run. Fine for recommendations and paper trading;
+if real money is on the line, an always-on host is safer:
+
+### Option B — always-on host (VPS / free tiers)
+
+- **systemd**: `scripts/systemd/tradebot.service`
 - **shell**: `scripts/run_bot.sh` (auto-restarts on crash)
+
+Any ₹300–500/month VPS (or Oracle Cloud's free tier) is sufficient —
+the bot is a single lightweight Python process.
 
 The loop knows the IST session timeline: pre-market analysis 08:50, entries
 only 09:30-14:30, monitoring every 45 s, square-off 15:12, EOD report 15:40,

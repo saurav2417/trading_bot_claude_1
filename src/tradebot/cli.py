@@ -34,6 +34,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("recommend", help="analyse and print trade plans (never orders)")
     run_p = sub.add_parser("run", help="autonomous trading loop")
     run_p.add_argument("--once", action="store_true", help="single tick then exit")
+    run_p.add_argument("--until", metavar="HH:MM",
+                       help="stop at this IST time (for capped cloud runners)")
     sub.add_parser("status", help="open positions and capital")
     sub.add_parser("squareoff", help="close all open positions now")
     rep_p = sub.add_parser("report", help="daily report")
@@ -72,7 +74,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.once:
             orch.run_once()
         else:
-            orch.run_forever()
+            orch.run_forever(until=args.until)
         return 0
 
     if args.command == "status":

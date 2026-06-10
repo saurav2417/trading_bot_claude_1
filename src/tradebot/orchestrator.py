@@ -67,11 +67,19 @@ class Orchestrator:
         return now.weekday() < 5
 
     # --------------------------------------------------------------- main
-    def run_forever(self) -> None:
-        log.info("orchestrator starting in %s mode (capital ₹%.0f)",
-                 self.settings.mode, self.settings.capital)
+    def run_forever(self, until: str | None = None) -> None:
+        """Run the loop, optionally stopping at IST time `until` (HH:MM).
+
+        A deadline makes the loop suitable for capped cloud runners
+        (e.g. GitHub Actions): state lives in the journal DB, so the next
+        scheduled run picks up open positions seamlessly.
+        """
+        self._deadline = _todays_time(self.now(), until) if until else None
+        log.info("orchestrator starting in %s mode (capital ₹%.0f)%s",
+                 self.settings.mode, self.settings.capital,
+                 f", until {until} IST" if until else "")
         self.notifier.send(f"tradebot started: mode={self.settings.mode}")
-        while True:
+        while self._deadline is None or self.now() < self._deadline:
             try:
                 self.tick()
             except KeyboardInterrupt:
@@ -81,6 +89,8 @@ class Orchestrator:
                 log.exception("tick failed: %s", exc)
                 self.journal.log_event("ERROR", f"tick failed: {exc}")
                 time.sleep(30)
+        log.info("session deadline %s reached; exiting cleanly "
+                 "(open positions persist in the journal)", until)
 
     def run_once(self) -> None:
         """Single pass: useful for cron-driven setups and smoke tests."""
@@ -221,6 +231,12 @@ class Orchestrator:
             nxt += timedelta(days=1)
             nxt = nxt.replace(hour=8, minute=45)
         wait = min((nxt - now).total_seconds(), 3600)
+        deadline = getattr(self, "_deadline", None)
+        if deadline is not None:
+            remaining = (deadline - now).total_seconds()
+            if remaining <= 0:
+                return
+            wait = min(wait, remaining)
         log.info("market closed; sleeping %.0f min (next session %s)", wait / 60, nxt)
         time.sleep(max(30, wait))
 
@@ -230,6 +246,11 @@ def _build(view, underlying, settings, lots: int):
     if not sel.actionable:
         raise ValueError(sel.reason)
     return sel.plan
+
+
+def _todays_time(now: datetime, hm: str) -> datetime:
+    h, m = map(int, hm.split(":"))
+    return now.replace(hour=h, minute=m, second=0, microsecond=0)
 
 
 def _seconds_until(now: datetime, hm: str) -> float:
