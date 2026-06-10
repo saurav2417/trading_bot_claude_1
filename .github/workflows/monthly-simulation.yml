@@ -12,6 +12,9 @@ on:
       weeks:
         description: "lookback window in weeks"
         default: "6"
+      overrides:
+        description: "risk overrides, space-separated key=value pairs"
+        required: false
 
 permissions:
   contents: write
@@ -35,7 +38,10 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           PYTHONPATH: src
           PYTHONUNBUFFERED: "1"
-        run: python -m tradebot.cli simulate --weeks "${{ inputs.weeks || '6' }}"
+        run: |
+          ARGS=""
+          for kv in ${{ inputs.overrides }}; do ARGS="$ARGS --set $kv"; done
+          python -m tradebot.cli simulate --weeks "${{ inputs.weeks || '6' }}" $ARGS
       - name: Persist report to bot-state branch
         if: always()
         run: |

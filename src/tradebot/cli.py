@@ -46,6 +46,10 @@ def main(argv: list[str] | None = None) -> int:
                            help="walk-forward historical simulation with synthetic "
                                 "option pricing (real candles + VIX, BS premiums)")
     sim_p.add_argument("--weeks", type=int, default=6)
+    sim_p.add_argument("--set", dest="overrides", action="append", default=[],
+                       metavar="KEY=VALUE",
+                       help="override a risk setting for this run, e.g. "
+                            "--set max_risk_per_trade_pct=3.0 (repeatable)")
 
     args = parser.parse_args(argv)
     _setup_logging(args.verbose)
@@ -107,6 +111,16 @@ def main(argv: list[str] | None = None) -> int:
 
         from .constants import INDIA_VIX
         from .simulator import Simulator, render_report
+        for item in args.overrides:
+            key, _, val = item.partition("=")
+            if not val:
+                print(f"ignoring malformed override {item!r}")
+                continue
+            try:
+                settings.risk[key.strip()] = float(val)
+            except ValueError:
+                settings.risk[key.strip()] = val
+            print(f"override: risk.{key.strip()} = {settings.risk[key.strip()]}")
         u = settings.underlyings[0]
         print(f"fetching history for {u.name} + India VIX...")
         daily = orch.client.daily_candles(u.security_id, u.segment, u.instrument,
