@@ -14,6 +14,7 @@ def make_settings(tmp_path: Path, mode: str = "paper", **overrides) -> Settings:
         "max_daily_loss_pct": 5.0,
         "max_open_positions": 2,
         "max_trades_per_day": 3,
+        "entry_cooldown_minutes": 0,  # off by default in tests; covered explicitly
         "stop_loss_premium_pct": 30,
         "target_premium_pct": 60,
         "trail_after_r": 1.0,

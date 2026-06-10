@@ -140,6 +140,11 @@ class Journal:
         return self.conn.execute(
             "SELECT COUNT(*) FROM trades WHERE status='OPEN'").fetchone()[0]
 
+    def last_trade_opened_at(self) -> str | None:
+        row = self.conn.execute(
+            "SELECT MAX(opened_at) FROM trades WHERE status != 'FAILED'").fetchone()
+        return row[0]
+
     def trades_opened_today(self) -> int:
         return self.conn.execute(
             "SELECT COUNT(*) FROM trades WHERE opened_at >= ?",

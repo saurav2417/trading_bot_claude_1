@@ -98,6 +98,23 @@ def test_size_lots_returns_largest_passing(tmp_path):
     assert plan is not None and plan.legs[0].lots == 2
 
 
+def test_entry_cooldown_blocks_back_to_back_trades(tmp_path):
+    _, journal, rm = setup(tmp_path, risk={"entry_cooldown_minutes": 45})
+    p1 = st.bull_call_spread(U, EXPIRY, parsed_chain(), lots=1)
+    journal.record_open(p1, "paper", 1000.0)  # opened_at = now
+    p2 = st.bull_call_spread(U, EXPIRY, parsed_chain(), lots=1)
+    verdict = rm.evaluate(p2)
+    assert not verdict and "cooldown" in verdict.reason
+
+
+def test_no_cooldown_when_disabled(tmp_path):
+    _, journal, rm = setup(tmp_path, risk={"entry_cooldown_minutes": 0})
+    p1 = st.bull_call_spread(U, EXPIRY, parsed_chain(), lots=1)
+    journal.record_open(p1, "paper", 1000.0)
+    p2 = st.bear_put_spread(U, EXPIRY, parsed_chain(), lots=1)
+    assert rm.evaluate(p2)
+
+
 def test_size_lots_none_when_nothing_fits(tmp_path):
     _, _, rm = setup(tmp_path, risk={"max_risk_per_trade_pct": 0.01})
     chain = parsed_chain()

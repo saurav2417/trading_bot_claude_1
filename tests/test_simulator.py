@@ -112,6 +112,20 @@ def test_simulation_respects_risk_caps(tmp_path):
     assert max(per_day.values()) <= 3
 
 
+def test_simulation_cooldown_spaces_entries(tmp_path):
+    settings = make_settings(tmp_path, risk={"entry_cooldown_minutes": 45})
+    daily, intraday, vix = synthetic_market()
+    result = Simulator(settings, daily, intraday, vix, weeks=2).run()
+    assert len(result.closed) > 0
+    by_day: dict[str, list[datetime]] = {}
+    for t in result.closed:
+        by_day.setdefault(t.entry_time.date().isoformat(), []).append(t.entry_time)
+    for entries in by_day.values():
+        entries.sort()
+        for a, b in zip(entries, entries[1:]):
+            assert (b - a) >= timedelta(minutes=45)
+
+
 def test_report_renders(tmp_path):
     settings = make_settings(tmp_path)
     daily, intraday, vix = synthetic_market()

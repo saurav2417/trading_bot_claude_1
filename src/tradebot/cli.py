@@ -138,6 +138,9 @@ def main(argv: list[str] | None = None) -> int:
         path.write_text(report)
         print(report)
         print(f"report written: {path}")
+        from .notify.telegram import Notifier
+        summary = "\n".join(report.splitlines()[:10])
+        Notifier(settings).send(f"Historical simulation finished:\n{summary}")
         return 0
 
     if args.command == "backtest":

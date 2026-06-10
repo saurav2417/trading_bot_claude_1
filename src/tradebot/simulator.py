@@ -207,6 +207,8 @@ class Simulator:
             day_realized = 0.0
             trades_today = 0
             last_scan: datetime | None = None
+            last_entry: datetime | None = None
+            cooldown = timedelta(minutes=int(self.s.risk.get("entry_cooldown_minutes", 0)))
             kill = False
 
             for idx, bar in enumerate(self.bars_by_day[day]):
@@ -233,6 +235,8 @@ class Simulator:
                     continue
                 if len(self._open()) >= int(self.s.risk.get("max_open_positions", 2)):
                     continue
+                if last_entry is not None and (now - last_entry) < cooldown:
+                    continue
 
                 i_score = intraday_momentum_score(self._intraday_window(day, idx)).score
                 # renormalised composite over available components
@@ -258,6 +262,7 @@ class Simulator:
                 if trade is not None:
                     self.trades.append(trade)
                     trades_today += 1
+                    last_entry = now
 
             self.equity.append((day, self.capital))
 

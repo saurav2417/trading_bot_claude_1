@@ -87,6 +87,18 @@ class RiskManager:
         if trades_today >= int(r.get("max_trades_per_day", 3)):
             return RiskVerdict(False, f"max trades/day reached ({trades_today})")
 
+        cooldown = int(r.get("entry_cooldown_minutes", 0))
+        if cooldown > 0:
+            last_open = self.journal.last_trade_opened_at()
+            if last_open:
+                from datetime import datetime, timedelta
+                elapsed = datetime.now() - datetime.fromisoformat(last_open)
+                if elapsed < timedelta(minutes=cooldown):
+                    remaining = cooldown - elapsed.total_seconds() / 60
+                    return RiskVerdict(
+                        False, f"entry cooldown active ({remaining:.0f} min left) — "
+                               "avoids duplicate entries and churn")
+
         if plan.max_loss == float("inf"):
             return RiskVerdict(False, "plan has unbounded max loss — rejected")
 

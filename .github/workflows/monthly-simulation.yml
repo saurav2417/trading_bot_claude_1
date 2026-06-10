@@ -1,0 +1,62 @@
+name: monthly-simulation
+
+# First Saturday-adjacent run of each month, 16:30 IST (after market hours):
+# re-runs the 6-week walk-forward simulation so strategy health is reviewed
+# on a schedule, with the summary pushed to Telegram and the full report
+# persisted on the bot-state branch.
+on:
+  schedule:
+    - cron: "0 11 1 * *"   # 1st of every month, 16:30 IST
+  workflow_dispatch:
+    inputs:
+      weeks:
+        description: "lookback window in weeks"
+        default: "6"
+
+permissions:
+  contents: write
+
+jobs:
+  simulate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Run simulation
+        env:
+          DHAN_CLIENT_ID: ${{ secrets.DHAN_CLIENT_ID }}
+          DHAN_ACCESS_TOKEN: ${{ secrets.DHAN_ACCESS_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          PYTHONPATH: src
+          PYTHONUNBUFFERED: "1"
+        run: python -m tradebot.cli simulate --weeks "${{ inputs.weeks || '6' }}"
+      - name: Persist report to bot-state branch
+        if: always()
+        run: |
+          set -e
+          ls reports/*.md >/dev/null 2>&1 || exit 0
+          cp -r reports /tmp/reports
+          git config user.name "tradebot"
+          git config user.email "tradebot@users.noreply.github.com"
+          if git fetch origin bot-state 2>/dev/null; then
+            git checkout -B bot-state origin/bot-state
+          else
+            git checkout --orphan bot-state
+            git rm -rf -q . || true
+          fi
+          mkdir -p reports
+          cp /tmp/reports/*.md reports/ 2>/dev/null || true
+          git add -f reports
+          git commit -m "simulation report $(date -u +%F)" || echo "no change"
+          git push -u origin bot-state
+      - uses: actions/upload-artifact@v4
+        with:
+          name: simulation-${{ github.run_id }}
+          path: reports/
+          if-no-files-found: ignore
