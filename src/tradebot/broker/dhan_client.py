@@ -237,7 +237,10 @@ class DhanClient:
 
 
 def _columns_to_candles(body: dict) -> list[dict]:
-    """Dhan chart APIs return parallel arrays; convert to a list of dicts."""
+    """Dhan chart APIs return parallel arrays; convert to a list of dicts.
+    Timestamps become IST-aware datetimes (exchange time, runner-independent)."""
+    from zoneinfo import ZoneInfo
+    ist = ZoneInfo("Asia/Kolkata")
     if not body or "close" not in body:
         return []
     keys = ["open", "high", "low", "close", "volume", "timestamp"]
@@ -251,7 +254,7 @@ def _columns_to_candles(body: dict) -> list[dict]:
             "low": float(cols["low"][i]),
             "close": float(cols["close"][i]),
             "volume": float(cols["volume"][i]) if i < len(cols["volume"]) else 0.0,
-            "time": datetime.fromtimestamp(cols["timestamp"][i])
+            "time": datetime.fromtimestamp(cols["timestamp"][i], tz=ist)
             if i < len(cols["timestamp"]) else None,
         })
     return out

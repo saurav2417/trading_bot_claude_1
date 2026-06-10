@@ -27,6 +27,9 @@ on:
         description: "one-shot analysis now (ignores market hours, never orders)"
         type: boolean
         default: false
+      simulate_weeks:
+        description: "run historical simulation for N weeks instead (e.g. 6)"
+        required: false
 
 concurrency:
   group: trading-session
@@ -81,7 +84,10 @@ jobs:
           PYTHONPATH: src
           PYTHONUNBUFFERED: "1"
         run: |
-          if [ "${{ inputs.oneshot }}" = "true" ]; then
+          if [ -n "${{ inputs.simulate_weeks }}" ]; then
+            echo "::notice::historical simulation (${{ inputs.simulate_weeks }} weeks, no orders)"
+            python -m tradebot.cli simulate --weeks "${{ inputs.simulate_weeks }}"
+          elif [ "${{ inputs.oneshot }}" = "true" ]; then
             echo "::notice::one-shot analysis (no orders, market hours ignored)"
             python -m tradebot.cli recommend
           else

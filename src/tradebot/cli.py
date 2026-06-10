@@ -42,6 +42,10 @@ def main(argv: list[str] | None = None) -> int:
     rep_p.add_argument("--date", help="YYYY-MM-DD (default today)")
     bt_p = sub.add_parser("backtest", help="directional-signal sanity check")
     bt_p.add_argument("--days", type=int, default=500)
+    sim_p = sub.add_parser("simulate",
+                           help="walk-forward historical simulation with synthetic "
+                                "option pricing (real candles + VIX, BS premiums)")
+    sim_p.add_argument("--weeks", type=int, default=6)
 
     args = parser.parse_args(argv)
     _setup_logging(args.verbose)
@@ -96,6 +100,44 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{r.plan_id} {r.strategy}: {r.action} ({r.reason}) pnl ₹{r.pnl:,.0f}")
         if not results:
             print("nothing to close")
+        return 0
+
+    if args.command == "simulate":
+        from datetime import date as _date
+
+        from .constants import INDIA_VIX
+        from .simulator import Simulator, render_report
+        u = settings.underlyings[0]
+        print(f"fetching history for {u.name} + India VIX...")
+        daily = orch.client.daily_candles(u.security_id, u.segment, u.instrument,
+                                          days=420)
+        intraday = orch.client.intraday_candles(u.security_id, u.segment,
+                                                u.instrument, interval=15,
+                                                days=min(85, args.weeks * 7 + 30))
+        vix_candles = orch.client.daily_candles(INDIA_VIX, u.segment, "INDEX",
+                                                days=120)
+        # prior trading day's VIX close, keyed by session date
+        vix_daily: dict[str, float] = {}
+        prev_close = None
+        for c in vix_candles:
+            if c["time"] is None:
+                continue
+            day_iso = c["time"].date().isoformat()
+            if prev_close is not None:
+                vix_daily[day_iso] = prev_close
+            prev_close = c["close"]
+        if prev_close is not None:
+            vix_daily[_date.today().isoformat()] = prev_close
+
+        print(f"daily candles: {len(daily)} | 15-min bars: {len(intraday)} "
+              f"| vix days: {len(vix_daily)}")
+        sim = Simulator(settings, daily, intraday, vix_daily, weeks=args.weeks)
+        result = sim.run()
+        report = render_report(result, args.weeks)
+        path = settings.reports_dir / f"simulation_{_date.today().isoformat()}.md"
+        path.write_text(report)
+        print(report)
+        print(f"report written: {path}")
         return 0
 
     if args.command == "backtest":
