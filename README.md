@@ -75,8 +75,10 @@ The repo ships with `.github/workflows/trading-session.yml`, which runs the
 bot entirely on GitHub's cloud:
 
 1. **Add secrets** (repo → Settings → Secrets and variables → Actions →
-   *New repository secret*): `DHAN_CLIENT_ID`, `DHAN_ACCESS_TOKEN`, and
-   optionally `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID`.
+   *New repository secret*): `DHAN_CLIENT_ID`, `DHAN_ACCESS_TOKEN`,
+   `ANTHROPIC_API_KEY` (for the LLM analyst), and optionally
+   `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID`. Telegram turns on
+   automatically once its secrets exist.
 2. **Set the mode** (optional): repo → Settings → Secrets and variables →
    Actions → *Variables* → add `TRADEBOT_MODE` = `recommend`/`paper`/`live`
    (defaults to `paper`).
@@ -103,6 +105,25 @@ the bot is a single lightweight Python process.
 The loop knows the IST session timeline: pre-market analysis 08:50, entries
 only 09:30-14:30, monitoring every 45 s, square-off 15:12, EOD report 15:40,
 sleeps through nights/weekends. All times configurable.
+
+## The LLM analyst (Claude)
+
+With `llm.enabled: true` (default) and an `ANTHROPIC_API_KEY` secret set, a
+Claude model (`claude-opus-4-8`) forms the market view each scan: it reads the
+full dossier — price action, indicator readings, option-chain positioning,
+VIX, FII/DII flows, news — and returns a structured verdict (direction score,
+conviction, volatility read, suggested structure, key factors, risks),
+grounded in the Varsity framework via its system prompt. Its reasoning is
+logged to the journal and sent to Telegram with every scan.
+
+The division of labour is deliberate: **the LLM forms the view; deterministic
+code keeps the guardrails.** Strategy construction, position sizing, risk
+caps, stop losses and the kill switch are all mechanical — a bad model
+response can never oversize a trade or remove a stop. If the quant composite
+strongly disagrees with the LLM, confidence is haircut; if the API is down or
+the key is missing, the system falls back to the quant composite and keeps
+running. Cost: roughly ₹40–130 per trading day at ~22 scans (tune
+`llm.model`/`llm.mode` in settings.yaml).
 
 ## What it trades and why
 

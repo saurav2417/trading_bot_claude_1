@@ -38,6 +38,7 @@ class Settings:
     signals: dict[str, Any]
     execution: dict[str, Any]
     notifications: dict[str, Any]
+    llm: dict[str, Any]
     db_path: Path
     cache_dir: Path
     reports_dir: Path
@@ -45,6 +46,7 @@ class Settings:
     dhan_access_token: str = ""
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
+    anthropic_api_key: str = ""
     weights: dict[str, float] = field(default_factory=dict)
 
     @property
@@ -89,6 +91,7 @@ def load_settings(path: str | Path | None = None) -> Settings:
         signals=signals,
         execution=raw.get("execution", {}),
         notifications=raw.get("notifications", {}),
+        llm=raw.get("llm", {}),
         db_path=db_path,
         cache_dir=cache_dir,
         reports_dir=reports_dir,
@@ -96,5 +99,6 @@ def load_settings(path: str | Path | None = None) -> Settings:
         dhan_access_token=os.environ.get("DHAN_ACCESS_TOKEN", ""),
         telegram_bot_token=os.environ.get("TELEGRAM_BOT_TOKEN", ""),
         telegram_chat_id=os.environ.get("TELEGRAM_CHAT_ID", ""),
+        anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
         weights=signals.get("weights", {}),
     )

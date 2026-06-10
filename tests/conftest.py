@@ -44,6 +44,7 @@ def make_settings(tmp_path: Path, mode: str = "paper", **overrides) -> Settings:
         execution={"product_type": "INTRADAY", "order_type": "LIMIT",
                    "limit_buffer_pct": 0.5},
         notifications={},
+        llm=overrides.pop("llm", {}),
         db_path=tmp_path / "test.db",
         cache_dir=tmp_path / "cache",
         reports_dir=tmp_path / "reports",

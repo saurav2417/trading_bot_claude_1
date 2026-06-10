@@ -76,6 +76,7 @@ jobs:
           DHAN_ACCESS_TOKEN: ${{ secrets.DHAN_ACCESS_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           TRADEBOT_MODE: ${{ inputs.mode || vars.TRADEBOT_MODE || 'paper' }}
           PYTHONPATH: src
           PYTHONUNBUFFERED: "1"

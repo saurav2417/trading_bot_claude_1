@@ -174,14 +174,24 @@ class Orchestrator:
                 "score": view.direction_score, "direction": view.direction,
                 "vol": view.vol_regime, "confidence": view.confidence,
                 "components": view.components,
+                "llm": view.llm.model_dump() if view.llm else None,
             })
             log.info(view.summary())
+            for note in view.notes:
+                log.info("  %s", note)
+
+            scan_msg = (f"scan {underlying.name}: {view.direction} "
+                        f"{view.direction_score:+.0f} | vol {view.vol_regime} "
+                        f"| conf {view.confidence:.2f}")
+            if view.llm:
+                scan_msg += f"\nLLM: {view.llm.summary}"
 
             # expiry-day guard: no fresh debit entries late on expiry day
             if (view.expiry == now.date().isoformat()
                     and self._hm(now) >= str(self.settings.execution.get(
                         "avoid_expiry_day_longs_after", "13:30"))):
                 log.info("expiry-day late window: skipping fresh entries")
+                self.notifier.send(scan_msg + "\nno trade: expiry-day late window")
                 continue
 
             plan = self.risk.size_lots(
@@ -191,11 +201,14 @@ class Orchestrator:
                 reason = sel.reason if not sel.actionable else \
                     self.risk.evaluate(sel.plan).reason
                 log.info("no trade for %s: %s", underlying.name, reason)
+                self.notifier.send(scan_msg + f"\nno trade: {reason}")
                 continue
 
             risk_amount = planned_risk(plan, self.settings)
             text = (f"RECOMMENDATION\n{plan.describe()}\n"
                     f"planned risk: ₹{risk_amount:,.0f}")
+            if view.llm:
+                text += f"\nLLM: {view.llm.summary}"
             self.notifier.send(text)
             self.journal.log_event("RECOMMENDATION", plan.describe())
             print(text)

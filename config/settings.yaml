@@ -66,7 +66,18 @@ execution:
   avoid_expiry_day_longs_after: "13:30"  # no fresh long-option entries late on expiry day
 
 notifications:
-  telegram_enabled: true
+  telegram_enabled: true     # active only when TELEGRAM_* secrets are set
+
+# LLM market analyst (Claude). The LLM forms the market view from the full
+# data dossier; deterministic code keeps all risk guardrails. Requires
+# ANTHROPIC_API_KEY; fails soft to the quant composite when unavailable.
+llm:
+  enabled: true
+  mode: primary              # primary: LLM view drives decisions (quant logged
+                             # for audit) | component: LLM is one weighted input
+  component_weight: 0.35     # used only in component mode
+  model: claude-opus-4-8
+  max_tokens: 16000
 
 paths:
   db: data/tradebot.db
