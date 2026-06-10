@@ -1,0 +1,20 @@
+# Install (as the user that owns the repo):
+#   sudo cp scripts/systemd/tradebot.service /etc/systemd/system/
+#   edit WorkingDirectory/User below, then:
+#   sudo systemctl daemon-reload && sudo systemctl enable --now tradebot
+[Unit]
+Description=Autonomous options trading bot (DhanHQ)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=trader
+WorkingDirectory=/home/trader/trading_bot_claude_1
+Environment=PYTHONPATH=/home/trader/trading_bot_claude_1/src
+ExecStart=/usr/bin/python3 -m tradebot.cli run
+Restart=always
+RestartSec=60
+
+[Install]
+WantedBy=multi-user.target

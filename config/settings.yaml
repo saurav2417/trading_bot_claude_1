@@ -1,0 +1,74 @@
+# ============================================================
+# Trade-bot configuration
+# Modes:
+#   recommend - analyse market, print/notify trade plans, never place orders
+#   paper     - simulated execution with full monitoring (default; run this
+#               for at least 4-6 weeks before considering live)
+#   live      - real orders via DhanHQ. Use only after paper results satisfy you.
+# ============================================================
+mode: paper
+
+capital:
+  initial: 50000            # INR
+  max_capital_per_trade: 40000   # premium/margin budget for any single trade
+
+underlyings:
+  - name: NIFTY
+    security_id: 13          # Dhan security id for NIFTY 50 index
+    segment: IDX_I
+    instrument: INDEX
+    lot_size: 75             # verify against current NSE contract spec
+    strike_step: 50
+
+risk:
+  max_risk_per_trade_pct: 3.0    # max planned loss per trade, % of capital
+  max_daily_loss_pct: 5.0        # kill switch: stop trading for the day
+  max_open_positions: 2
+  max_trades_per_day: 3
+  stop_loss_premium_pct: 30      # long options: exit if premium drops 30%
+  target_premium_pct: 60         # long options: book at +60% premium
+  trail_after_r: 1.0             # start trailing once 1R in profit
+  trail_lock_r: 0.5              # lock in 0.5R once trailing starts
+  credit_profit_take_pct: 50     # credit spreads: buy back at 50% of max profit
+  credit_stop_multiple: 1.5      # credit spreads: exit if loss = 1.5x credit received
+  max_spread_width: 300          # max strike width for spreads (points)
+
+schedule:
+  timezone: Asia/Kolkata
+  premarket_time: "08:50"
+  market_open: "09:15"
+  no_trade_before: "09:30"      # let opening volatility settle (Varsity guidance)
+  last_entry_time: "14:30"
+  intraday_squareoff_time: "15:12"
+  market_close: "15:30"
+  eod_report_time: "15:40"
+  signal_interval_minutes: 15
+  monitor_interval_seconds: 45
+
+signals:
+  direction_threshold: 30        # |score| >= this => directional view
+  strong_direction_threshold: 55
+  min_confidence: 0.50
+  vix_high: 17.0                 # India VIX above => high-vol regime
+  vix_low: 12.5                  # below => low-vol regime
+  # component weights for the composite direction score (sum need not be 1)
+  weights:
+    daily_trend: 0.30
+    intraday_momentum: 0.25
+    option_chain: 0.20
+    fii_dii: 0.15
+    news: 0.10
+
+execution:
+  product_type: INTRADAY         # INTRADAY | MARGIN (positional/overnight)
+  order_type: LIMIT              # LIMIT recommended; MARKET allowed
+  limit_buffer_pct: 0.5          # cross the spread by this % on limit orders
+  avoid_expiry_day_longs_after: "13:30"  # no fresh long-option entries late on expiry day
+
+notifications:
+  telegram_enabled: false
+
+paths:
+  db: data/tradebot.db
+  cache_dir: data/cache
+  reports_dir: reports
