@@ -66,7 +66,7 @@ execution:
   avoid_expiry_day_longs_after: "13:30"  # no fresh long-option entries late on expiry day
 
 notifications:
-  telegram_enabled: false
+  telegram_enabled: true
 
 paths:
   db: data/tradebot.db
