@@ -23,6 +23,10 @@ on:
       until:
         description: "stop at IST time HH:MM (default: session end)"
         required: false
+      oneshot:
+        description: "one-shot analysis now (ignores market hours, never orders)"
+        type: boolean
+        default: false
 
 concurrency:
   group: trading-session
@@ -75,7 +79,13 @@ jobs:
           TRADEBOT_MODE: ${{ inputs.mode || vars.TRADEBOT_MODE || 'paper' }}
           PYTHONPATH: src
           PYTHONUNBUFFERED: "1"
-        run: python -m tradebot.cli run --until "${{ steps.session.outputs.until }}"
+        run: |
+          if [ "${{ inputs.oneshot }}" = "true" ]; then
+            echo "::notice::one-shot analysis (no orders, market hours ignored)"
+            python -m tradebot.cli recommend
+          else
+            python -m tradebot.cli run --until "${{ steps.session.outputs.until }}"
+          fi
 
       - name: Persist journal/state to bot-state branch
         if: always()
