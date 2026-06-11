@@ -38,5 +38,7 @@ VOL_HIGH = "HIGH"
 VOL_NORMAL = "NORMAL"
 VOL_LOW = "LOW"
 
-# Dhan scrip-master (detailed) — used to resolve option contract security ids
-SCRIP_MASTER_URL = "https://images.dhan.co/api-data/api-scrip-master-detailed.csv"
+# Dhan scrip master (compact, SEM_* schema) — resolves option contract
+# security ids and the authoritative lot size. The parser also tolerates the
+# detailed master's column names as a fallback.
+SCRIP_MASTER_URL = "https://images.dhan.co/api-data/api-scrip-master.csv"

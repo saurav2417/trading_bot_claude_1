@@ -136,3 +136,53 @@ def test_performance_breakdown_empty(tmp_path):
     settings = make_settings(tmp_path)
     out = performance_breakdown(Journal(settings.db_path))
     assert "No closed trades" in out
+
+
+# ------------------------------------------------------ scrip master parser
+def _client_with_master(tmp_path, csv_text):
+    import datetime
+    from tradebot.broker.dhan_client import DhanClient
+    c = DhanClient.__new__(DhanClient)
+    c._scrip_index = None
+    c.cache_dir = tmp_path
+    (tmp_path / f"scrip_master_v2_{datetime.date.today().isoformat()}.csv").write_text(csv_text)
+    return c
+
+
+COMPACT_CSV = (
+    "SEM_EXM_EXCH_ID,SEM_INSTRUMENT_NAME,SM_SYMBOL_NAME,SEM_EXPIRY_DATE,"
+    "SEM_STRIKE_PRICE,SEM_OPTION_TYPE,SEM_SMST_SECURITY_ID,SEM_LOT_UNITS,SEM_CUSTOM_SYMBOL\n"
+    "NSE,OPTIDX,NIFTY,2026-06-16,23200.000000,PE,123456,65,NIFTY 16 JUN 23200 PUT\n"
+    "NSE,OPTIDX,NIFTY,2026-06-16,23050.000000,CE,123457,65,NIFTY 16 JUN 23050 CALL\n"
+    "NSE,EQUITY,RELIANCE,,0,,999,1,RELIANCE\n"
+)
+
+DETAILED_CSV = (
+    "EXCH_ID,INSTRUMENT,UNDERLYING_SYMBOL,SM_EXPIRY_DATE,STRIKE_PRICE,"
+    "OPTION_TYPE,SECURITY_ID,LOT_SIZE,DISPLAY_NAME\n"
+    "NSE,OPTIDX,NIFTY,2026-06-16,23200.00,PE,123456,65,NIFTY 23200 PE\n"
+)
+
+
+def test_scrip_master_compact_schema(tmp_path):
+    c = _client_with_master(tmp_path, COMPACT_CSV)
+    idx = c._load_scrip_master()
+    assert len(idx) == 2  # equity row skipped
+    assert c.resolve_lot_size("NIFTY") == 65
+    assert c.resolve_option("NIFTY", "2026-06-16", 23200, "PE")["security_id"] == 123456
+
+
+def test_scrip_master_detailed_schema(tmp_path):
+    c = _client_with_master(tmp_path, DETAILED_CSV)
+    assert c.resolve_lot_size("NIFTY") == 65
+    assert c.resolve_option("NIFTY", "2026-06-16", 23200, "PE")["security_id"] == 123456
+
+
+def test_scrip_master_empty_raises_with_headers(tmp_path):
+    from tradebot.broker.dhan_client import DhanError
+    c = _client_with_master(tmp_path, "COL_A,COL_B\nx,y\n")
+    try:
+        c._load_scrip_master()
+        assert False, "expected DhanError"
+    except DhanError as exc:
+        assert "COL_A" in str(exc)  # surfaces seen columns for diagnosis

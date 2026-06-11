@@ -171,7 +171,7 @@ class DhanClient:
         NSE index-option lookup by (underlying, expiry, strike, type)."""
         if self._scrip_index is not None:
             return self._scrip_index
-        cache_file = self.cache_dir / f"scrip_master_{date.today().isoformat()}.csv"
+        cache_file = self.cache_dir / f"scrip_master_v2_{date.today().isoformat()}.csv"
         if cache_file.exists():
             text = cache_file.read_text()
         else:
@@ -183,29 +183,48 @@ class DhanClient:
 
         index: dict[tuple, dict] = {}
         reader = csv.DictReader(io.StringIO(text))
+
+        def pick(row: dict, *names: str) -> str:
+            for n in names:
+                v = row.get(n)
+                if v not in (None, ""):
+                    return str(v)
+            return ""
+
         for row in reader:
             try:
-                if row.get("SEM_EXM_EXCH_ID") != "NSE":
+                # tolerate both the compact (SEM_*) and detailed scrip-master
+                # column schemas — Dhan publishes both and column names differ
+                exch = pick(row, "SEM_EXM_EXCH_ID", "EXCH_ID").upper()
+                if exch != "NSE":
                     continue
-                if row.get("SEM_INSTRUMENT_NAME") not in ("OPTIDX",):
+                inst = pick(row, "SEM_INSTRUMENT_NAME", "INSTRUMENT",
+                            "INSTRUMENT_TYPE").upper()
+                if inst not in ("OPTIDX",):
                     continue
-                symbol = (row.get("SM_SYMBOL_NAME") or "").strip().upper()
-                expiry = (row.get("SEM_EXPIRY_DATE") or "")[:10]
-                strike = float(row.get("SEM_STRIKE_PRICE") or 0)
-                opt_type = (row.get("SEM_OPTION_TYPE") or "").strip().upper()
-                if not symbol or not expiry or not opt_type:
+                symbol = pick(row, "SM_SYMBOL_NAME", "UNDERLYING_SYMBOL",
+                              "SYMBOL_NAME").strip().upper()
+                expiry = pick(row, "SEM_EXPIRY_DATE", "SM_EXPIRY_DATE",
+                              "EXPIRY_DATE")[:10]
+                strike = float(pick(row, "SEM_STRIKE_PRICE", "STRIKE_PRICE") or 0)
+                opt_type = pick(row, "SEM_OPTION_TYPE", "OPTION_TYPE").strip().upper()
+                sec_id = pick(row, "SEM_SMST_SECURITY_ID", "SECURITY_ID")
+                if not symbol or not expiry or not opt_type or not sec_id:
                     continue
+                lot = pick(row, "SEM_LOT_UNITS", "LOT_SIZE")
                 index[(symbol, expiry, strike, opt_type)] = {
-                    "security_id": int(row["SEM_SMST_SECURITY_ID"]),
-                    "lot_size": int(float(row.get("SEM_LOT_UNITS") or 0)) or None,
-                    "trading_symbol": row.get("SEM_CUSTOM_SYMBOL")
-                    or row.get("SEM_TRADING_SYMBOL"),
+                    "security_id": int(sec_id),
+                    "lot_size": int(float(lot)) if lot else None,
+                    "trading_symbol": pick(row, "SEM_CUSTOM_SYMBOL",
+                                           "SEM_TRADING_SYMBOL", "DISPLAY_NAME",
+                                           "SYMBOL_NAME"),
                 }
             except (KeyError, ValueError, TypeError):
                 continue
         if not index:
-            raise DhanError("scrip master parsed but no NSE index options found "
-                            "(format may have changed)")
+            headers = list(reader.fieldnames or [])[:12]
+            raise DhanError("scrip master parsed but no NSE index options found; "
+                            f"first columns seen: {headers}")
         self._scrip_index = index
         return index
 
