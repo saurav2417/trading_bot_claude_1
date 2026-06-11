@@ -1,18 +1,17 @@
 name: trading-session
 
-# Two sessions per trading day (GitHub Actions cron is UTC; IST = UTC+5:30).
-# Morning  09:20-12:30 IST, afternoon 12:25-15:50 IST. The afternoon run
-# queues behind the morning one (concurrency group) and resumes monitoring
-# any open positions from the journal restored off the bot-state branch.
+# Self-healing schedule: GitHub cron fires can be delayed or silently
+# skipped, so we tick every 30 minutes through the session window
+# (08:50-15:20 IST). The concurrency group serialises runs: the first tick
+# owns the session, later ticks queue and exit immediately once their
+# deadline (12:30 or 15:50 IST by UTC hour) has passed — and if a session
+# crashes mid-day, the next tick resumes monitoring within 30 minutes.
 #
-# NOTE: GitHub's scheduler can delay cron fires by several minutes. That is
-# acceptable for recommend/paper mode. If you go live with real money,
-# prefer an always-on host (see README) — a delayed start means positions
-# are unmonitored for that long.
+# NOTE: GitHub's scheduler is still best-effort. Fine for recommend/paper;
+# if you go live with real money, prefer an always-on host (see README).
 on:
   schedule:
-    - cron: "50 3 * * 1-5"   # 09:20 IST
-    - cron: "55 6 * * 1-5"   # 12:25 IST
+    - cron: "20,50 3-9 * * 1-5"   # every 30 min, 08:50-15:20 IST, Mon-Fri
   workflow_dispatch:
     inputs:
       mode:
