@@ -186,6 +186,9 @@ class Orchestrator:
                 "vol": view.vol_regime, "confidence": view.confidence,
                 "components": view.components,
                 "llm": view.llm.model_dump() if view.llm else None,
+                # shadow metrics: logged for later predictive-value analysis
+                "gex": view.chain.net_gex if view.chain else None,
+                "gex_flip": view.chain.gex_flip if view.chain else None,
             })
             log.info(view.summary())
             for note in view.notes:

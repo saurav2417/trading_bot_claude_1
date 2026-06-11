@@ -19,6 +19,8 @@ class ChainAnalysis:
     atm_iv: float | None = None           # average of ATM CE/PE IV
     oi_support: float | None = None       # strike with highest put OI
     oi_resistance: float | None = None    # strike with highest call OI
+    net_gex: float | None = None          # Σ(γ_call·OI_call − γ_put·OI_put)
+    gex_flip: float | None = None         # strike where cumulative GEX crosses 0
     direction_score: float = 0.0          # [-1, 1]
     notes: list[str] = field(default_factory=list)
 
@@ -58,6 +60,7 @@ def parse_chain(chain: dict) -> ChainAnalysis:
         analysis.oi_support = max(pe_oi_by_strike, key=pe_oi_by_strike.get)
 
     analysis.max_pain = _max_pain(ce_oi_by_strike, pe_oi_by_strike)
+    _compute_gex(analysis)
     analysis.atm_strike = min(strikes, key=lambda s: abs(s - spot))
     atm = strikes[analysis.atm_strike]
     ivs = [
@@ -70,6 +73,45 @@ def parse_chain(chain: dict) -> ChainAnalysis:
 
     analysis.direction_score = _chain_direction(analysis)
     return analysis
+
+
+def _compute_gex(a: ChainAnalysis) -> None:
+    """Net gamma exposure under the standard dealer convention (call OI
+    contributes +gamma, put OI −gamma) and the flip strike where the
+    cumulative profile changes sign.
+
+    Positive net GEX => dealer hedging dampens moves (pinning/mean-reversion,
+    range structures favoured); negative => hedging amplifies moves (trend /
+    long-premium favoured). SHADOW METRIC for now: journaled on every scan and
+    shown to the LLM, but given no weight in the composite until its
+    predictive value is measured on our own journal data.
+    """
+    per_strike: list[tuple[float, float]] = []
+    for strike, legs in a.strikes.items():
+        ce_g = ((legs.get("ce") or {}).get("greeks") or {}).get("gamma")
+        pe_g = ((legs.get("pe") or {}).get("greeks") or {}).get("gamma")
+        if ce_g is None and pe_g is None:
+            continue
+        ce_oi = float((legs.get("ce") or {}).get("oi") or 0)
+        pe_oi = float((legs.get("pe") or {}).get("oi") or 0)
+        per_strike.append((strike, float(ce_g or 0) * ce_oi - float(pe_g or 0) * pe_oi))
+    if not per_strike:
+        return
+    per_strike.sort()
+    a.net_gex = round(sum(g for _, g in per_strike), 2)
+    cum, prev_sign = 0.0, None
+    for strike, g in per_strike:
+        cum += g
+        sign = cum > 0
+        if prev_sign is not None and sign != prev_sign:
+            a.gex_flip = strike
+            break
+        prev_sign = sign
+    if a.net_gex is not None:
+        regime = ("positive: dealer hedging dampens moves (pinning)" if a.net_gex > 0
+                  else "negative: dealer hedging amplifies moves (trendy)")
+        a.notes.append(f"net GEX {a.net_gex:,.0f} {regime}"
+                       + (f", flip ~{a.gex_flip:.0f}" if a.gex_flip else ""))
 
 
 def _max_pain(ce_oi: dict[float, float], pe_oi: dict[float, float]) -> float | None:

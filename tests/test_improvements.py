@@ -204,3 +204,38 @@ def test_scrip_master_empty_raises_with_headers(tmp_path):
         assert False, "expected DhanError"
     except DhanError as exc:
         assert "COL_A" in str(exc)  # surfaces seen columns for diagnosis
+
+
+# --------------------------------------------------------- gamma exposure
+def test_gex_computed_from_chain():
+    from tradebot.analysis.options_analysis import parse_chain
+    a = parse_chain(synthetic_chain())
+    assert a.net_gex is not None
+    assert any("GEX" in n for n in a.notes)
+    # symmetric gamma, put OI dominates below spot in the fixture -> sign sane
+    assert isinstance(a.net_gex, float)
+
+
+def test_gex_absent_without_greeks():
+    from tradebot.analysis.options_analysis import parse_chain
+    chain = synthetic_chain()
+    for legs in chain["oc"].values():
+        legs["ce"]["greeks"].pop("gamma", None)
+        legs["pe"]["greeks"].pop("gamma", None)
+    a = parse_chain(chain)
+    assert a.net_gex is None  # no fabricated values
+
+
+def test_vol_premium_filter_mapping():
+    from tradebot.simulator import apply_vol_premium_filter, realized_vol_pct
+    # rich premium -> debit becomes credit
+    assert apply_vol_premium_filter("LONG_CALL", 3.0) == "BULL_PUT_SPREAD"
+    assert apply_vol_premium_filter("BEAR_PUT_SPREAD", 3.0) == "BEAR_CALL_SPREAD"
+    # cheap premium -> credit becomes debit, condor refused
+    assert apply_vol_premium_filter("BULL_PUT_SPREAD", -3.0) == "BULL_CALL_SPREAD"
+    assert apply_vol_premium_filter("IRON_CONDOR", -3.0) is None
+    # neutral band / missing data -> unchanged
+    assert apply_vol_premium_filter("LONG_CALL", 0.5) == "LONG_CALL"
+    assert apply_vol_premium_filter("LONG_CALL", None) == "LONG_CALL"
+    rv = realized_vol_pct([100, 101, 99, 102, 100, 101])
+    assert rv is not None and rv > 0

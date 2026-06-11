@@ -150,6 +150,11 @@ def build_dossier(*, underlying: str, spot: float, daily_detail: dict,
                   f"PCR: {chain.pcr} | max pain: {chain.max_pain} | ATM IV: {chain.atm_iv}",
                   f"Max put-OI support: {chain.oi_support} | "
                   f"max call-OI resistance: {chain.oi_resistance}"]
+        if chain.net_gex is not None:
+            lines.append(
+                f"Net gamma exposure (dealer convention): {chain.net_gex:,.0f}"
+                + (f" | flip strike ~{chain.gex_flip:.0f}" if chain.gex_flip else "")
+                + " — positive dampens moves (pinning), negative amplifies them")
     if vix is not None:
         lines += ["", f"## India VIX: {vix:.2f}"]
     if flows is not None:

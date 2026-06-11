@@ -264,6 +264,12 @@ class Simulator:
                 strong = abs(score) >= strong_thr
                 vol, _ = classify_vol_adaptive(vix, vix_history, self.s.signals)
                 strategy = _select(direction, vol, strong)
+                if self.s.signals.get("use_vol_premium_filter"):
+                    rv = realized_vol_pct([c["close"] for c in daily_prefix[-7:]])
+                    vrp = (vix - rv) if rv is not None else None
+                    strategy = apply_vol_premium_filter(
+                        strategy, vrp,
+                        float(self.s.signals.get("vol_premium_threshold", 2.0)))
                 if strategy is None:
                     continue
 
@@ -380,6 +386,40 @@ class Simulator:
             self.capital += trade.pnl
             realized += trade.pnl
         return realized
+
+
+def realized_vol_pct(closes: list[float]) -> float | None:
+    """Annualised realized volatility (%) from daily closes (log returns)."""
+    if len(closes) < 4:
+        return None
+    rets = [math.log(closes[i] / closes[i - 1]) for i in range(1, len(closes))
+            if closes[i - 1] > 0]
+    if len(rets) < 3:
+        return None
+    mean = sum(rets) / len(rets)
+    var = sum((r - mean) ** 2 for r in rets) / (len(rets) - 1)
+    return math.sqrt(var * 252.0) * 100.0
+
+
+def apply_vol_premium_filter(strategy: str | None, vrp: float | None,
+                             threshold: float = 2.0) -> str | None:
+    """Gamma-economics filter: VRP = implied (VIX) − realized vol.
+
+    Rich premium (vrp >= +t): being short gamma is paid for — prefer credit
+    structures. Cheap premium (vrp <= −t): realized moves exceed what options
+    price — prefer long-gamma debit structures, and refuse to sell condors.
+    """
+    if strategy is None or vrp is None:
+        return strategy
+    if vrp >= threshold:
+        return {LONG_CALL: BULL_PUT_SPREAD, BULL_CALL_SPREAD: BULL_PUT_SPREAD,
+                LONG_PUT: BEAR_CALL_SPREAD, BEAR_PUT_SPREAD: BEAR_CALL_SPREAD,
+                }.get(strategy, strategy)
+    if vrp <= -threshold:
+        return {BULL_PUT_SPREAD: BULL_CALL_SPREAD,
+                BEAR_CALL_SPREAD: BEAR_PUT_SPREAD,
+                IRON_CONDOR: None}.get(strategy, strategy)
+    return strategy
 
 
 # -------------------------------------------------- strategy construction

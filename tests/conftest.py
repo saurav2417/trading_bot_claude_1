@@ -75,13 +75,14 @@ def synthetic_chain(spot: float = 25000.0, step: int = 50,
         elif pcr_shape == "bearish":
             ce_oi *= 1.8
 
+        gamma = max(5e-05, 0.0008 - abs(dist) * 6e-07)  # peaks at ATM
         oc[f"{strike:.6f}"] = {
             "ce": {"last_price": round(ce_price, 2), "oi": ce_oi,
                    "implied_volatility": 14.0, "volume": 10000,
-                   "greeks": {"delta": round(ce_delta, 3)}},
+                   "greeks": {"delta": round(ce_delta, 3), "gamma": gamma}},
             "pe": {"last_price": round(pe_price, 2), "oi": pe_oi,
                    "implied_volatility": 14.5, "volume": 10000,
-                   "greeks": {"delta": round(pe_delta, 3)}},
+                   "greeks": {"delta": round(pe_delta, 3), "gamma": gamma}},
         }
     return {"last_price": spot, "oc": oc}
 
