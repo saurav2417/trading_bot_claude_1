@@ -24,6 +24,11 @@ log = logging.getLogger(__name__)
 BASE_URL = "https://api.dhan.co/v2"
 OPTION_CHAIN_MIN_INTERVAL = 3.1  # Dhan rate-limits option chain to 1 req / 3s
 
+# Index-option underlyings we keep from the scrip master (keeps the index lean
+# and lets us derive the underlying from the trading symbol robustly)
+INDEX_UNDERLYINGS = {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY",
+                     "NIFTYNXT50", "SENSEX", "BANKEX", "SENSEX50"}
+
 
 class DhanError(RuntimeError):
     pass
@@ -181,6 +186,8 @@ class DhanClient:
             text = resp.text
             cache_file.write_text(text)
 
+        import re
+
         index: dict[tuple, dict] = {}
         reader = csv.DictReader(io.StringIO(text))
 
@@ -191,25 +198,46 @@ class DhanClient:
                     return str(v)
             return ""
 
+        def derive_symbol(row: dict) -> str:
+            """Underlying for an index-option row, robust to which symbol
+            columns Dhan populates: prefer an explicit symbol field, else take
+            the leading alpha run of the trading/custom symbol."""
+            explicit = pick(row, "SM_SYMBOL_NAME", "UNDERLYING_SYMBOL",
+                            "SYMBOL_NAME").strip().upper()
+            if explicit in INDEX_UNDERLYINGS:
+                return explicit
+            for col in ("SEM_CUSTOM_SYMBOL", "SEM_TRADING_SYMBOL",
+                        "DISPLAY_NAME", "SYMBOL_NAME", "SM_SYMBOL_NAME"):
+                v = pick(row, col).strip().upper()
+                if not v:
+                    continue
+                compact = v.replace(" ", "")
+                for idx in sorted(INDEX_UNDERLYINGS, key=len, reverse=True):
+                    if compact.startswith(idx):       # longest name first
+                        return idx
+                m = re.match(r"[A-Z]+", v)
+                if m and m.group(0) in INDEX_UNDERLYINGS:
+                    return m.group(0)
+            return ""
+
         for row in reader:
             try:
-                # tolerate both the compact (SEM_*) and detailed scrip-master
-                # column schemas — Dhan publishes both and column names differ
-                exch = pick(row, "SEM_EXM_EXCH_ID", "EXCH_ID").upper()
-                if exch != "NSE":
+                # identify option rows by what's always reliable — an option
+                # type and a positive strike — rather than exact instrument or
+                # exchange label values, which vary across Dhan's master files
+                opt_type = pick(row, "SEM_OPTION_TYPE", "OPTION_TYPE").strip().upper()
+                if opt_type not in ("CE", "PE"):
                     continue
-                inst = pick(row, "SEM_INSTRUMENT_NAME", "INSTRUMENT",
-                            "INSTRUMENT_TYPE").upper()
-                if inst not in ("OPTIDX",):
+                strike = float(pick(row, "SEM_STRIKE_PRICE", "STRIKE_PRICE") or 0)
+                if strike <= 0:
                     continue
-                symbol = pick(row, "SM_SYMBOL_NAME", "UNDERLYING_SYMBOL",
-                              "SYMBOL_NAME").strip().upper()
+                symbol = derive_symbol(row)
+                if symbol not in INDEX_UNDERLYINGS:   # keep only index options
+                    continue
                 expiry = pick(row, "SEM_EXPIRY_DATE", "SM_EXPIRY_DATE",
                               "EXPIRY_DATE")[:10]
-                strike = float(pick(row, "SEM_STRIKE_PRICE", "STRIKE_PRICE") or 0)
-                opt_type = pick(row, "SEM_OPTION_TYPE", "OPTION_TYPE").strip().upper()
                 sec_id = pick(row, "SEM_SMST_SECURITY_ID", "SECURITY_ID")
-                if not symbol or not expiry or not opt_type or not sec_id:
+                if not expiry or not sec_id:
                     continue
                 lot = pick(row, "SEM_LOT_UNITS", "LOT_SIZE")
                 index[(symbol, expiry, strike, opt_type)] = {
@@ -222,9 +250,9 @@ class DhanClient:
             except (KeyError, ValueError, TypeError):
                 continue
         if not index:
-            headers = list(reader.fieldnames or [])[:12]
-            raise DhanError("scrip master parsed but no NSE index options found; "
-                            f"first columns seen: {headers}")
+            headers = list(reader.fieldnames or [])[:14]
+            raise DhanError("scrip master parsed but no index options found; "
+                            f"columns seen: {headers}")
         self._scrip_index = index
         return index
 

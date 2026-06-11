@@ -157,6 +157,15 @@ COMPACT_CSV = (
     "NSE,EQUITY,RELIANCE,,0,,999,1,RELIANCE\n"
 )
 
+# the live failure mode: SM_SYMBOL_NAME blank on option rows, underlying only
+# present in the trading/custom symbol
+COMPACT_CSV_BLANK_SYMBOL = (
+    "SEM_EXM_EXCH_ID,SEM_INSTRUMENT_NAME,SM_SYMBOL_NAME,SEM_EXPIRY_DATE,"
+    "SEM_STRIKE_PRICE,SEM_OPTION_TYPE,SEM_SMST_SECURITY_ID,SEM_LOT_UNITS,SEM_CUSTOM_SYMBOL\n"
+    "NSE,OPTIDX,,2026-06-16,23200.000000,PE,123456,65,NIFTY 16 JUN 23200 PUT\n"
+    "NSE,OPTIDX,,2026-06-16,45000.000000,CE,222,15,BANKNIFTY 16 JUN 45000 CALL\n"
+)
+
 DETAILED_CSV = (
     "EXCH_ID,INSTRUMENT,UNDERLYING_SYMBOL,SM_EXPIRY_DATE,STRIKE_PRICE,"
     "OPTION_TYPE,SECURITY_ID,LOT_SIZE,DISPLAY_NAME\n"
@@ -175,6 +184,15 @@ def test_scrip_master_compact_schema(tmp_path):
 def test_scrip_master_detailed_schema(tmp_path):
     c = _client_with_master(tmp_path, DETAILED_CSV)
     assert c.resolve_lot_size("NIFTY") == 65
+    assert c.resolve_option("NIFTY", "2026-06-16", 23200, "PE")["security_id"] == 123456
+
+
+def test_scrip_master_derives_underlying_when_symbol_blank(tmp_path):
+    c = _client_with_master(tmp_path, COMPACT_CSV_BLANK_SYMBOL)
+    idx = c._load_scrip_master()
+    assert len(idx) == 2
+    assert c.resolve_lot_size("NIFTY") == 65
+    assert c.resolve_lot_size("BANKNIFTY") == 15
     assert c.resolve_option("NIFTY", "2026-06-16", 23200, "PE")["security_id"] == 123456
 
 
