@@ -58,6 +58,13 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("analyze", help="setup-level P&L attribution from the journal")
     sub.add_parser("verify", help="triangulate a live recommendation against Dhan: "
                                   "real lot size, live premiums, real margin")
+    lt = sub.add_parser("livetest",
+                        help="LIVE: buy 1 lot of a cheap option and immediately "
+                             "square off, to validate real order execution")
+    lt.add_argument("--yes", action="store_true", help="required to actually trade")
+    lt.add_argument("--max-spend", type=float, default=8000.0,
+                    help="hard cap on premium outlay (INR)")
+    lt.add_argument("--type", choices=["CE", "PE"], default="CE")
 
     args = parser.parse_args(argv)
     _setup_logging(args.verbose)
@@ -133,6 +140,9 @@ def main(argv: list[str] | None = None) -> int:
         except Exception:  # noqa: BLE001
             pass
         return 0
+
+    if args.command == "livetest":
+        return _livetest(orch, settings, args)
 
     if args.command == "recommend":
         # force recommend semantics regardless of configured mode
@@ -272,6 +282,77 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     return 1
+
+
+def _livetest(orch, settings, args) -> int:
+    """Validate the real order round-trip with one cheap long option.
+
+    Buys 1 lot of a near-ATM option (defined, capped cost — no margin/short
+    surprises), captures the fill, then immediately squares off. Isolates
+    'does live execution work' from strategy/risk. Heavily guarded.
+    """
+    from .analysis.market_view import pick_expiry
+    from .analysis.options_analysis import parse_chain
+    from .constants import BUY, NSE_FNO, SELL
+
+    if not settings.is_live:
+        print("livetest requires mode=live (set TRADEBOT_MODE=live). Refusing in "
+              f"{settings.mode} mode.", file=sys.stderr)
+        return 2
+    if not args.yes:
+        print("livetest will place a REAL order. Re-run with --yes to proceed.",
+              file=sys.stderr)
+        return 2
+
+    u = settings.underlyings[0]
+    real_lot = orch.client.resolve_lot_size(u.name) or u.lot_size
+    expiries = orch.client.expiry_list(u.security_id, u.segment)
+    expiry = pick_expiry(expiries)
+    chain = parse_chain(orch.client.option_chain(u.security_id, expiry, u.segment))
+    if not chain.strikes:
+        print("no option chain available", file=sys.stderr)
+        return 1
+    atm = min(chain.strikes, key=lambda s: abs(s - chain.spot))
+    from .analysis.options_analysis import leg_price
+    px = leg_price(chain, atm, args.type)
+    if not px or px <= 0:
+        print(f"no tradeable price for {atm:.0f}{args.type}", file=sys.stderr)
+        return 1
+    cost = px * real_lot
+    print(f"livetest: {u.name} {expiry} {atm:.0f}{args.type} 1 lot x{real_lot} "
+          f"@ ~{px:.2f} = ₹{cost:,.0f}")
+    if cost > args.max_spend:
+        print(f"cost ₹{cost:,.0f} exceeds --max-spend ₹{args.max_spend:,.0f}. Refusing.",
+              file=sys.stderr)
+        return 2
+
+    info = orch.client.resolve_option(u.name, expiry, atm, args.type)
+    sid, qty = info["security_id"], real_lot
+    ex = orch.executor
+    try:
+        buy_px = ex._fill_leg_raw(sid, BUY, qty, px)
+        orch.journal.log_event("LIVETEST", f"BUY {atm:.0f}{args.type} @ {buy_px}")
+        orch.notifier.send(f"livetest BUY filled @ {buy_px}")
+        print(f"  BUY filled @ {buy_px:.2f}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"BUY failed: {exc}", file=sys.stderr)
+        return 1
+    try:
+        sell_px = ex._fill_leg_raw(sid, SELL, qty, buy_px)
+        print(f"  SELL filled @ {sell_px:.2f}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"SELL failed — YOU HAVE AN OPEN 1-LOT LONG {atm:.0f}{args.type}; "
+              f"square it off manually now. ({exc})", file=sys.stderr)
+        orch.notifier.send(f"livetest SELL FAILED — open long {atm:.0f}{args.type}, "
+                           "square off manually")
+        return 1
+    pnl = (sell_px - buy_px) * qty
+    orch.journal.log_event("LIVETEST", f"round-trip pnl ₹{pnl:.0f}")
+    orch.notifier.send(f"livetest round-trip done: pnl ₹{pnl:,.0f} "
+                       f"(BUY {buy_px} / SELL {sell_px})")
+    print(f"  round-trip P&L (pre-charges): ₹{pnl:,.0f}")
+    print("  live execution round-trip OK ✓")
+    return 0
 
 
 if __name__ == "__main__":

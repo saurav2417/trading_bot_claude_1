@@ -6,8 +6,11 @@ import json
 import sqlite3
 from datetime import date, datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from ..strategy.base import OptionLeg, TradePlan
+
+IST = ZoneInfo("Asia/Kolkata")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS trades (
@@ -148,13 +151,13 @@ class Journal:
     def trades_opened_today(self) -> int:
         return self.conn.execute(
             "SELECT COUNT(*) FROM trades WHERE opened_at >= ?",
-            (date.today().isoformat(),)).fetchone()[0]
+            (_today(),)).fetchone()[0]
 
     def realized_pnl_today(self) -> float:
         row = self.conn.execute(
             "SELECT COALESCE(SUM(realized_pnl), 0) FROM trades"
             " WHERE status='CLOSED' AND closed_at >= ?",
-            (date.today().isoformat(),)).fetchone()
+            (_today(),)).fetchone()
         return float(row[0])
 
     def total_realized_pnl(self) -> float:
@@ -178,4 +181,8 @@ class Journal:
 
 
 def _now() -> str:
-    return datetime.now().isoformat(timespec="seconds")
+    return datetime.now(IST).isoformat(timespec="seconds")
+
+
+def _today() -> str:
+    return datetime.now(IST).date().isoformat()

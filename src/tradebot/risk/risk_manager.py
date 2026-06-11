@@ -92,7 +92,12 @@ class RiskManager:
             last_open = self.journal.last_trade_opened_at()
             if last_open:
                 from datetime import datetime, timedelta
-                elapsed = datetime.now() - datetime.fromisoformat(last_open)
+                from zoneinfo import ZoneInfo
+                last_dt = datetime.fromisoformat(last_open)
+                # journal timestamps are IST-aware; match tz-awareness so the
+                # subtraction never mixes naive/aware datetimes
+                now_dt = datetime.now(last_dt.tzinfo or ZoneInfo("Asia/Kolkata"))
+                elapsed = now_dt - last_dt
                 if elapsed < timedelta(minutes=cooldown):
                     remaining = cooldown - elapsed.total_seconds() / 60
                     return RiskVerdict(
