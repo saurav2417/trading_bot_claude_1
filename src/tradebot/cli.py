@@ -78,6 +78,14 @@ def main(argv: list[str] | None = None) -> int:
         print(performance_breakdown(Journal(settings.db_path)))
         return 0
 
+    from .broker.dhan_client import DhanError
+    from .orchestrator import Orchestrator
+    try:
+        orch = Orchestrator(settings)
+    except DhanError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
     if args.command == "verify":
         from .strategy.selector import select_strategy
         u = settings.underlyings[0]
@@ -125,14 +133,6 @@ def main(argv: list[str] | None = None) -> int:
         except Exception:  # noqa: BLE001
             pass
         return 0
-
-    from .broker.dhan_client import DhanError
-    from .orchestrator import Orchestrator
-    try:
-        orch = Orchestrator(settings)
-    except DhanError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 2
 
     if args.command == "recommend":
         # force recommend semantics regardless of configured mode
