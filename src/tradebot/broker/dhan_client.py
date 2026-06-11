@@ -218,9 +218,39 @@ class DhanClient:
             raise DhanError(f"option contract not found in scrip master: {key}")
         return idx[key]
 
+    def resolve_lot_size(self, underlying: str) -> int | None:
+        """Authoritative current lot size for an index's options, read from the
+        Dhan scrip master (uniform across strikes/expiries for an index).
+        Returns None if the underlying isn't found so callers can fall back."""
+        idx = self._load_scrip_master()
+        u = underlying.upper()
+        sizes = {info["lot_size"] for (sym, *_), info in idx.items()
+                 if sym == u and info.get("lot_size")}
+        if not sizes:
+            return None
+        # if Dhan ever lists a transitional mix, the largest is the safe choice
+        return max(sizes)
+
     # ------------------------------------------------------ account/orders
     def fund_limit(self) -> dict:
         return self._request("GET", "/fundlimit") or {}
+
+    def order_margin(self, *, security_id: int, transaction_type: str,
+                     quantity: int, price: float, product_type: str = "INTRADAY",
+                     exchange_segment: str = NSE_FNO) -> dict:
+        """Real margin for a single order from Dhan's calculator.
+        -> {totalMargin, spanMargin, exposureMargin, availableBalance, ...}.
+        For a bought option this is ~premium*qty; for a sold option it is the
+        full SPAN+exposure (≈₹1+ lakh per NIFTY lot) before any hedge benefit."""
+        return self._request("POST", "/margincalculator", {
+            "dhanClientId": self.client_id,
+            "exchangeSegment": exchange_segment,
+            "transactionType": transaction_type,
+            "quantity": int(quantity),
+            "productType": product_type,
+            "securityId": str(security_id),
+            "price": round(price, 2),
+        }) or {}
 
     def positions(self) -> list[dict]:
         body = self._request("GET", "/positions")

@@ -197,6 +197,11 @@ class Orchestrator:
             if view.llm:
                 scan_msg += f"\nLLM: {view.llm.summary}"
 
+            # use the authoritative lot size from Dhan's scrip master, not the
+            # config default — index lot sizes change and a stale value
+            # corrupts every quantity, premium and risk figure downstream
+            self._sync_lot_size(underlying)
+
             # expiry-day guard: no fresh debit entries late on expiry day
             if (view.expiry == now.date().isoformat()
                     and self._hm(now) >= str(self.settings.execution.get(
@@ -216,19 +221,78 @@ class Orchestrator:
                 continue
 
             risk_amount = planned_risk(plan, self.settings)
+            broker_margin, margin_detail = self._broker_margin(plan)
             text = (f"RECOMMENDATION\n{plan.describe()}\n"
-                    f"planned risk: ₹{risk_amount:,.0f}")
+                    f"planned risk (stop-loss): ₹{risk_amount:,.0f}")
+            if broker_margin is not None:
+                text += (f"\nbroker margin (Dhan, sum of legs): ₹{broker_margin:,.0f}"
+                         f"\n  {margin_detail}")
+                if any(l.action == "SELL" for l in plan.legs):
+                    text += ("\n  note: short legs show full SPAN until the hedge "
+                             "is recognised; place both legs together for the "
+                             "reduced net margin")
             if view.llm:
                 text += f"\nLLM: {view.llm.summary}"
             self.notifier.send(text)
             self.journal.log_event("RECOMMENDATION", plan.describe())
             print(text)
 
+            # affordability gate against real broker margin (capital preservation)
+            if broker_margin is not None and broker_margin > self.risk.capital_now():
+                msg = (f"NOT placing {plan.plan_id}: broker margin ₹{broker_margin:,.0f} "
+                       f"exceeds account capital ₹{self.risk.capital_now():,.0f}. "
+                       "At this capital prefer long options or genuinely "
+                       "margin-benefit-eligible hedges.")
+                log.warning(msg)
+                self.journal.log_event("RISK_BLOCK", msg)
+                self.notifier.send(msg)
+                continue
+
             if self.settings.places_orders:
                 ok = self.executor.open_trade(plan, risk_amount)
                 if ok:
                     self.notifier.send(f"EXECUTED [{self.settings.mode}] "
                                        f"{plan.plan_id} {plan.strategy}")
+
+    def _sync_lot_size(self, underlying) -> None:
+        """Overwrite the configured lot size with Dhan's authoritative value
+        (cached for the session). No-op if the lookup fails — the config
+        default stays as a fallback."""
+        if getattr(self, "_lot_synced", None) == underlying.name:
+            return
+        try:
+            real = self.client.resolve_lot_size(underlying.name)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("lot-size lookup failed for %s: %s", underlying.name, exc)
+            return
+        if real and real != underlying.lot_size:
+            log.warning("lot size for %s: config %d -> Dhan scrip master %d (using "
+                        "Dhan)", underlying.name, underlying.lot_size, real)
+            underlying.lot_size = real
+        self._lot_synced = underlying.name
+
+    def _broker_margin(self, plan) -> tuple[float | None, str]:
+        """Real per-leg margin from Dhan's calculator, summed. Resolves the
+        contracts' security ids first. Returns (total, per-leg detail) or
+        (None, reason) when unavailable so the caller can fall back."""
+        try:
+            self.executor._resolve_legs(plan)
+        except Exception as exc:  # noqa: BLE001
+            return None, f"contract resolution failed: {exc}"
+        product = self.settings.execution.get("product_type", "INTRADAY")
+        total, parts = 0.0, []
+        for leg in plan.legs:
+            try:
+                m = self.client.order_margin(
+                    security_id=leg.security_id, transaction_type=leg.action,
+                    quantity=leg.quantity, price=leg.price, product_type=product)
+                tm = float(m.get("totalMargin") or 0)
+            except Exception as exc:  # noqa: BLE001
+                return None, f"margin calc unavailable: {exc}"
+            total += tm
+            parts.append(f"{leg.action} {leg.strike:.0f}{leg.option_type} "
+                         f"x{leg.quantity}: ₹{tm:,.0f}")
+        return total, " | ".join(parts)
 
     def _monitor_positions(self) -> None:
         if not self.journal.open_trade_count():

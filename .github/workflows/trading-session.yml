@@ -26,6 +26,10 @@ on:
         description: "one-shot analysis now (ignores market hours, never orders)"
         type: boolean
         default: false
+      verify:
+        description: "triangulate one live recommendation (lot size, premiums, margin)"
+        type: boolean
+        default: false
       simulate_weeks:
         description: "run historical simulation for N weeks instead (e.g. 6)"
         required: false
@@ -83,7 +87,10 @@ jobs:
           PYTHONPATH: src
           PYTHONUNBUFFERED: "1"
         run: |
-          if [ -n "${{ inputs.simulate_weeks }}" ]; then
+          if [ "${{ inputs.verify }}" = "true" ]; then
+            echo "::notice::verify — triangulating a live recommendation"
+            python -m tradebot.cli verify
+          elif [ -n "${{ inputs.simulate_weeks }}" ]; then
             echo "::notice::historical simulation (${{ inputs.simulate_weeks }} weeks, no orders)"
             python -m tradebot.cli simulate --weeks "${{ inputs.simulate_weeks }}"
           elif [ "${{ inputs.oneshot }}" = "true" ]; then

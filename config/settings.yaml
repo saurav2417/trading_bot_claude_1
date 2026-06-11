@@ -17,7 +17,9 @@ underlyings:
     security_id: 13          # Dhan security id for NIFTY 50 index
     segment: IDX_I
     instrument: INDEX
-    lot_size: 75             # verify against current NSE contract spec
+    lot_size: 65             # FALLBACK ONLY — the live value is read from the
+                             # Dhan scrip master at runtime (index lot sizes
+                             # change; never trust this number for sizing)
     strike_step: 50
 
 risk:

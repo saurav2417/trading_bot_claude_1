@@ -56,6 +56,8 @@ def main(argv: list[str] | None = None) -> int:
                             "--set regime.enabled=false (repeatable; bare keys "
                             "default to the risk section)")
     sub.add_parser("analyze", help="setup-level P&L attribution from the journal")
+    sub.add_parser("verify", help="triangulate a live recommendation against Dhan: "
+                                  "real lot size, live premiums, real margin")
 
     args = parser.parse_args(argv)
     _setup_logging(args.verbose)
@@ -74,6 +76,54 @@ def main(argv: list[str] | None = None) -> int:
         from .journal.journal import Journal
         from .journal.reports import performance_breakdown
         print(performance_breakdown(Journal(settings.db_path)))
+        return 0
+
+    if args.command == "verify":
+        from .strategy.selector import select_strategy
+        u = settings.underlyings[0]
+        try:
+            real_lot = orch.client.resolve_lot_size(u.name)
+        except Exception as exc:  # noqa: BLE001
+            real_lot = None
+            print(f"lot-size lookup failed: {exc}")
+        print(f"LOT SIZE  config={u.lot_size}  |  Dhan scrip master={real_lot}")
+        if real_lot:
+            u.lot_size = real_lot
+        view = orch.view_builder.build(u)
+        print(f"\nVIEW  {view.summary()}")
+        sel = select_strategy(view, u, settings, lots=1)
+        if not sel.actionable:
+            print(f"\nno actionable plan right now: {sel.reason}")
+            return 0
+        plan = sel.plan
+        broker_margin, detail = orch._broker_margin(plan)
+        sids = [l.security_id for l in plan.legs if l.security_id]
+        try:
+            ltps = orch.client.option_ltp(sids) if sids else {}
+        except Exception:  # noqa: BLE001
+            ltps = {}
+        print(f"\n{plan.strategy}  expiry {plan.expiry}  (1 lot = {u.lot_size})")
+        print(f"  {'leg':<26}{'plan px':>9}{'live LTP':>10}")
+        for l in plan.legs:
+            live = ltps.get(l.security_id)
+            tag = f"{l.action} {l.strike:.0f}{l.option_type} x{l.quantity}"
+            print(f"  {tag:<26}{l.price:>9.2f}"
+                  f"{(f'{live:.2f}' if live else 'n/a'):>10}")
+        ml = plan.max_loss
+        print(f"\n  net {'credit' if plan.net_premium > 0 else 'debit'}: "
+              f"₹{abs(plan.net_premium):,.0f}")
+        print(f"  defined-risk max loss: "
+              f"{'UNBOUNDED' if ml == float('inf') else f'₹{ml:,.0f}'}")
+        if broker_margin is not None:
+            print(f"  broker margin (Dhan, sum of legs): ₹{broker_margin:,.0f}")
+            print(f"    {detail}")
+        try:
+            funds = orch.client.fund_limit()
+            avail = funds.get("availabelBalance") or funds.get("availableBalance")
+            if avail is not None:
+                print(f"  available balance: ₹{float(avail):,.0f}")
+        except Exception:  # noqa: BLE001
+            pass
         return 0
 
     from .broker.dhan_client import DhanError
@@ -149,6 +199,13 @@ def main(argv: list[str] | None = None) -> int:
             target[subkey] = parsed
             print(f"override: {section}.{subkey} = {parsed}")
         u = settings.underlyings[0]
+        try:
+            real_lot = orch.client.resolve_lot_size(u.name)
+            if real_lot and real_lot != u.lot_size:
+                print(f"lot size: config {u.lot_size} -> Dhan {real_lot} (using Dhan)")
+                u.lot_size = real_lot
+        except Exception as exc:  # noqa: BLE001
+            print(f"lot-size lookup failed ({exc}); using config {u.lot_size}")
         print(f"fetching history for {u.name} + India VIX...")
         daily = orch.client.daily_candles(u.security_id, u.segment, u.instrument,
                                           days=420)
