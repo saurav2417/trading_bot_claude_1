@@ -100,31 +100,48 @@ class DhanClient:
 
     def daily_candles(self, security_id: int, segment: str, instrument: str,
                       days: int = 200) -> list[dict]:
-        to_d, from_d = date.today(), date.today() - timedelta(days=days)
-        body = self._request("POST", "/charts/historical", {
+        # Dhan 400s when toDate has no market data yet (e.g. today before the
+        # session); walk the end date back until the request succeeds.
+        return self._candles_with_date_fallback("/charts/historical", {
             "securityId": str(security_id),
             "exchangeSegment": segment,
             "instrument": instrument,
             "expiryCode": 0,
             "oi": False,
-            "fromDate": from_d.isoformat(),
-            "toDate": to_d.isoformat(),
-        })
-        return _columns_to_candles(body)
+        }, base_to=date.today(), days=days)
 
     def intraday_candles(self, security_id: int, segment: str, instrument: str,
                          interval: int = 15, days: int = 5) -> list[dict]:
-        to_d, from_d = date.today() + timedelta(days=1), date.today() - timedelta(days=days)
-        body = self._request("POST", "/charts/intraday", {
+        return self._candles_with_date_fallback("/charts/intraday", {
             "securityId": str(security_id),
             "exchangeSegment": segment,
             "instrument": instrument,
             "interval": str(interval),
             "oi": False,
-            "fromDate": from_d.isoformat(),
-            "toDate": to_d.isoformat(),
-        })
-        return _columns_to_candles(body)
+        }, base_to=date.today() + timedelta(days=1), days=days)
+
+    def _candles_with_date_fallback(self, path: str, payload: dict,
+                                    base_to: date, days: int) -> list[dict]:
+        last_exc: Exception | None = None
+        for shift in range(4):
+            to_d = base_to - timedelta(days=shift)
+            from_d = to_d - timedelta(days=days)
+            body_payload = {**payload, "fromDate": from_d.isoformat(),
+                            "toDate": to_d.isoformat()}
+            try:
+                body = self._request("POST", path, body_payload,
+                                     retries=0 if shift < 3 else 2)
+                candles = _columns_to_candles(body)
+                if candles:
+                    return candles
+                last_exc = DhanError(f"{path} returned no candles up to {to_d}")
+            except DhanError as exc:
+                if "400" not in str(exc):
+                    raise
+                log.warning("%s rejected toDate=%s; retrying with earlier end date",
+                            path, to_d)
+                last_exc = exc
+        raise DhanError(f"{path} failed for all end dates: {last_exc}")
 
     def expiry_list(self, underlying_scrip: int, segment: str = IDX_I) -> list[str]:
         body = self._request("POST", "/optionchain/expirylist", {
