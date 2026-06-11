@@ -35,7 +35,10 @@ on:
         required: false
 
 concurrency:
-  group: trading-session
+  # Live sessions serialise on one group; read-only diagnostic runs
+  # (verify/oneshot/simulate) get a unique group so they never queue behind
+  # an in-progress session.
+  group: ${{ (inputs.verify || inputs.oneshot || inputs.simulate_weeks) && format('diag-{0}', github.run_id) || 'trading-session' }}
   cancel-in-progress: false
 
 permissions:
