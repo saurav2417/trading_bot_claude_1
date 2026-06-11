@@ -57,6 +57,36 @@ def daily_trend_score(daily_candles: list[dict]) -> TechnicalRead:
     return TechnicalRead(max(-1.0, min(1.0, score)), detail)
 
 
+def regime_check(daily_candles: list[dict], cfg: dict) -> tuple[bool, str]:
+    """Is the market trending enough to justify directional trades?
+
+    Returns (trending, note). Chop = weak ADX or a compressed recent range;
+    trend systems give back their edge in chop via stop-out bleed, so the
+    selector refuses directional structures when this returns False
+    (range-bound structures like iron condors remain allowed).
+    """
+    if not cfg or not cfg.get("enabled", False):
+        return True, "regime filter off"
+    if len(daily_candles) < 40:
+        return True, "regime filter: insufficient history, not applied"
+
+    min_adx = float(cfg.get("min_daily_adx", 18))
+    days = int(cfg.get("range_compression_days", 5))
+    min_range_pct = float(cfg.get("range_compression_pct", 1.2))
+
+    ax = adx(daily_candles, 14)[-1]
+    recent = daily_candles[-days:]
+    close = daily_candles[-1]["close"]
+    range_pct = ((max(c["high"] for c in recent) - min(c["low"] for c in recent))
+                 / close * 100.0) if close else 0.0
+
+    if ax is not None and ax < min_adx:
+        return False, f"chop: ADX {ax:.1f} < {min_adx}"
+    if range_pct < min_range_pct:
+        return False, f"chop: {days}-day range {range_pct:.2f}% < {min_range_pct}%"
+    return True, f"trending: ADX {ax:.1f}, {days}-day range {range_pct:.2f}%"
+
+
 def intraday_momentum_score(intraday_candles: list[dict]) -> TechnicalRead:
     closes = [c["close"] for c in intraday_candles]
     if len(closes) < 40:

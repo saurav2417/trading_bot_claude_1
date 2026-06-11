@@ -56,8 +56,14 @@ signals:
   direction_threshold: 30        # |score| >= this => directional view
   strong_direction_threshold: 55
   min_confidence: 0.50
-  vix_high: 17.0                 # India VIX above => high-vol regime
-  vix_low: 12.5                  # below => low-vol regime
+  # Volatility regime: IV percentile of India VIX over the trailing year
+  # (Varsity's preferred read); falls back to fixed thresholds when history
+  # is unavailable.
+  use_iv_percentile: true
+  vol_percentile_high: 75
+  vol_percentile_low: 25
+  vix_high: 17.0                 # fixed-threshold fallback
+  vix_low: 12.5
   # component weights for the composite direction score (sum need not be 1)
   weights:
     daily_trend: 0.30
@@ -85,6 +91,23 @@ llm:
   component_weight: 0.35     # used only in component mode
   model: claude-opus-4-8
   max_tokens: 16000
+
+# Regime filter: refuse directional entries when the daily chart shows no
+# trend (low ADX) or a compressed range — trend systems bleed in chop.
+# Iron condors (range-bound playbook) remain allowed. A/B-tested before
+# enabling; re-test with the monthly simulation when tuning.
+regime:
+  enabled: true
+  min_daily_adx: 18            # ADX(14) below this => no directional edge
+  range_compression_days: 5
+  range_compression_pct: 1.2   # N-day range under this % of spot => chop
+
+# Known event days (RBI MPC, Union Budget, election results, Fed/CPI nights
+# that gap the open). The bot takes no fresh entries on these dates.
+# Maintain this list ~monthly; the LLM analyst also flags event risk from
+# headlines when enabled.
+events:
+  skip_dates: []               # e.g. ["2026-08-06", "2027-02-01"]
 
 paths:
   db: data/tradebot.db

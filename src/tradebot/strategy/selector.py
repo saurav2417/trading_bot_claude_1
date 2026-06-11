@@ -51,6 +51,12 @@ def select_strategy(view: MarketView, underlying: Underlying,
             None, f"confidence {view.confidence:.2f} < {min_conf} (signals disagree "
                   "or data missing) — capital preservation first")
 
+    # chop filter: directional structures need a trending tape; range-bound
+    # structures (iron condor) are exactly for the opposite regime
+    if view.direction in (BULLISH, BEARISH) and not view.trending:
+        return Selection(None, f"chop filter: {view.regime_note} — "
+                               "directional edge absent, staying out")
+
     rationale = (f"view={view.direction} score={view.direction_score:+.0f} "
                  f"vol={view.vol_regime} vix={view.vix} conf={view.confidence:.2f}")
     chain, expiry = view.chain, view.expiry

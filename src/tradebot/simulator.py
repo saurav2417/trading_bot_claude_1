@@ -21,7 +21,9 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 
-from .analysis.technicals import daily_trend_score, intraday_momentum_score
+from .analysis.market_view import classify_vol_adaptive
+from .analysis.technicals import (daily_trend_score, intraday_momentum_score,
+                                  regime_check)
 from .constants import (BEAR_CALL_SPREAD, BEAR_PUT_SPREAD, BEARISH,
                         BULL_CALL_SPREAD, BULL_PUT_SPREAD, BULLISH, BUY, CE,
                         IRON_CONDOR, LONG_CALL, LONG_PUT, NEUTRAL, PE, SELL,
@@ -149,11 +151,14 @@ class SimResult:
 class Simulator:
     def __init__(self, settings, daily_candles: list[dict],
                  intraday_candles: list[dict], vix_daily: dict[str, float],
-                 weeks: int = 6):
+                 weeks: int = 6,
+                 vix_series: list[tuple[str, float]] | None = None):
         self.s = settings
         self.daily = daily_candles
         self.weeks = weeks
         self.vix_daily = vix_daily          # date iso -> prior-day VIX close
+        # full (date iso, close) series for trailing IV-percentile classification
+        self.vix_series = sorted(vix_series or [])
         self.u = settings.underlyings[0]
         self.bars_by_day: dict[str, list[dict]] = {}
         for bar in intraday_candles:
@@ -199,11 +204,15 @@ class Simulator:
         strong_thr = float(self.s.signals.get("strong_direction_threshold", 55))
         start_capital = self.capital
 
+        skip_dates = set(self.s.events.get("skip_dates") or [])
         for day in test_days:
             daily_prefix = self._daily_prefix(day)
             if len(daily_prefix) < 80:
                 continue
             d_score = daily_trend_score(daily_prefix).score
+            trending, _ = regime_check(daily_prefix, self.s.regime)
+            vix_history = [c for d, c in self.vix_series if d < day]
+            event_day = day in skip_dates
             day_realized = 0.0
             trades_today = 0
             last_scan: datetime | None = None
@@ -225,7 +234,7 @@ class Simulator:
                     kill = True
 
                 # 2) entry scan every 15 minutes inside the window
-                if kill or hm < "09:30" or hm > "14:30":
+                if kill or event_day or hm < "09:30" or hm > "14:30":
                     continue
                 if last_scan and (now - last_scan) < timedelta(minutes=15):
                     continue
@@ -250,10 +259,10 @@ class Simulator:
                     continue
 
                 direction = BULLISH if score >= thr else BEARISH if score <= -thr else NEUTRAL
+                if direction != NEUTRAL and not trending:
+                    continue  # chop filter, as in the live selector
                 strong = abs(score) >= strong_thr
-                vol = (VOL_HIGH if vix >= float(self.s.signals.get("vix_high", 17.0))
-                       else VOL_LOW if vix <= float(self.s.signals.get("vix_low", 12.5))
-                       else VOL_NORMAL)
+                vol, _ = classify_vol_adaptive(vix, vix_history, self.s.signals)
                 strategy = _select(direction, vol, strong)
                 if strategy is None:
                     continue

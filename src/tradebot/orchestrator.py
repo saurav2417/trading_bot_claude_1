@@ -50,6 +50,7 @@ class Orchestrator:
         self._premarket_done: str = ""
         self._eod_done: str = ""
         self._last_scan: datetime | None = None
+        self._event_skip_notified: str = ""
 
     # ----------------------------------------------------------- schedule
     def _t(self, key: str, default: str) -> str:
@@ -164,6 +165,16 @@ class Orchestrator:
 
     def scan_and_trade(self, now: datetime | None = None) -> None:
         now = now or self.now()
+        skip_dates = self.settings.events.get("skip_dates") or []
+        if now.date().isoformat() in skip_dates:
+            if self._event_skip_notified != now.date().isoformat():
+                msg = (f"event day {now.date().isoformat()}: no fresh entries "
+                       "(events.skip_dates)")
+                log.info(msg)
+                self.journal.log_event("EVENT_SKIP", msg)
+                self.notifier.send(msg)
+                self._event_skip_notified = now.date().isoformat()
+            return
         for underlying in self.settings.underlyings:
             try:
                 view = self.view_builder.build(underlying)

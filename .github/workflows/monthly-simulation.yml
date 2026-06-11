@@ -13,7 +13,10 @@ on:
         description: "lookback window in weeks"
         default: "6"
       overrides:
-        description: "risk overrides, space-separated key=value pairs"
+        description: "overrides, space-separated section.key=value pairs"
+        required: false
+      end_weeks_ago:
+        description: "shift test window back N weeks (non-overlapping windows)"
         required: false
 
 permissions:
@@ -41,6 +44,9 @@ jobs:
         run: |
           ARGS=""
           for kv in ${{ inputs.overrides }}; do ARGS="$ARGS --set $kv"; done
+          if [ -n "${{ inputs.end_weeks_ago }}" ]; then
+            ARGS="$ARGS --end-weeks-ago ${{ inputs.end_weeks_ago }}"
+          fi
           python -m tradebot.cli simulate --weeks "${{ inputs.weeks || '6' }}" $ARGS
       - name: Persist report to bot-state branch
         if: always()

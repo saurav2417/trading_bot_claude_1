@@ -48,6 +48,8 @@ class Settings:
     telegram_chat_id: str = ""
     anthropic_api_key: str = ""
     weights: dict[str, float] = field(default_factory=dict)
+    regime: dict[str, Any] = field(default_factory=dict)
+    events: dict[str, Any] = field(default_factory=dict)
 
     @property
     def is_live(self) -> bool:
@@ -101,4 +103,6 @@ def load_settings(path: str | Path | None = None) -> Settings:
         telegram_chat_id=os.environ.get("TELEGRAM_CHAT_ID", ""),
         anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
         weights=signals.get("weights", {}),
+        regime=raw.get("regime", {}),
+        events=raw.get("events", {}),
     )

@@ -40,6 +40,10 @@ bought when vol is cheap and sold (defined-risk only) when vol is rich.
 OI above spot is resistance; PCR extremes read conventionally.
 - Capital preservation beats opportunity. If evidence is mixed, say NEUTRAL \
 with low conviction — "no trade" is a position. Never manufacture conviction.
+- Event risk: if the dossier date or headlines imply a scheduled macro event \
+(RBI policy, Union Budget, election results, Fed/US-CPI overnight, major \
+earnings or expiry-day distortions), lower conviction and name it in risks — \
+gaps invalidate intraday technicals.
 - You do NOT size positions, set stops, or place orders; deterministic risk \
 code does that. Your direction_score and conviction drive strategy selection \
 from this menu only: LONG_CALL, LONG_PUT, BULL_CALL_SPREAD, BEAR_PUT_SPREAD, \
@@ -125,7 +129,12 @@ def build_dossier(*, underlying: str, spot: float, daily_detail: dict,
                   headlines: list[str] | None = None,
                   quant_components: dict | None = None) -> str:
     """Assemble everything the quant layer measured into one prompt document."""
-    lines = [f"# Market dossier: {underlying}", f"Spot: {spot:.1f}"]
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    now = datetime.now(ZoneInfo("Asia/Kolkata"))
+    lines = [f"# Market dossier: {underlying}",
+             f"As of: {now.strftime('%A %d %B %Y, %H:%M')} IST",
+             f"Spot: {spot:.1f}"]
 
     if recent_closes:
         closes = ", ".join(f"{c:.0f}" for c in recent_closes[-15:])

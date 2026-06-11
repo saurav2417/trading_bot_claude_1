@@ -49,6 +49,8 @@ def make_settings(tmp_path: Path, mode: str = "paper", **overrides) -> Settings:
         db_path=tmp_path / "test.db",
         cache_dir=tmp_path / "cache",
         reports_dir=tmp_path / "reports",
+        regime=overrides.pop("regime", {}),
+        events=overrides.pop("events", {}),
     )
 
 

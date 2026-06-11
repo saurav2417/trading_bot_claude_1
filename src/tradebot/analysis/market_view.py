@@ -18,7 +18,7 @@ from ..data.fii_dii import FlowData, fetch_fii_dii
 from ..data.news import NewsSentiment, fetch_news_sentiment
 from .llm_analyst import LLMAnalyst, LLMView as LLMViewOutput, build_dossier
 from .options_analysis import ChainAnalysis, parse_chain
-from .technicals import daily_trend_score, intraday_momentum_score
+from .technicals import daily_trend_score, intraday_momentum_score, regime_check
 
 log = logging.getLogger(__name__)
 
@@ -46,6 +46,8 @@ class MarketView:
     components: dict[str, float] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
     llm: LLMViewOutput | None = None
+    trending: bool = True
+    regime_note: str = ""
     as_of: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
 
     def summary(self) -> str:
@@ -67,6 +69,7 @@ class MarketViewBuilder:
         self.llm = LLMAnalyst(settings.llm, settings.anthropic_api_key)
         self._flows: FlowData | None | str = "unset"
         self._news: NewsSentiment | None = None
+        self._vix_history: list[float] | None = None
 
     # cached-per-run external inputs --------------------------------------
     def flows(self) -> FlowData | None:
@@ -98,6 +101,9 @@ class MarketViewBuilder:
         components["intraday_momentum"] = momentum.score
         notes.append(f"daily: {trend.detail}")
         notes.append(f"intraday: {momentum.detail}")
+
+        trending, regime_note = regime_check(daily, s.regime)
+        notes.append(regime_note)
 
         # option chain (nearest expiry)
         chain_analysis: ChainAnalysis | None = None
@@ -135,14 +141,11 @@ class MarketViewBuilder:
         agreement = _agreement(list(used.values()))
         confidence = round(coverage * agreement, 2)
 
-        # volatility regime from India VIX (fallback: ATM IV)
+        # volatility regime: IV percentile of VIX history, fixed-threshold fallback
         vix = self._fetch_vix()
-        vol_regime, vol_note = classify_vol(
-            vix,
-            chain_analysis.atm_iv if chain_analysis else None,
-            float(s.signals.get("vix_high", 17.0)),
-            float(s.signals.get("vix_low", 12.5)),
-        )
+        vol_regime, vol_note = classify_vol_adaptive(
+            vix if vix else (chain_analysis.atm_iv if chain_analysis else None),
+            self._fetch_vix_history(), s.signals)
         if vol_note:
             notes.append(vol_note)
 
@@ -201,6 +204,8 @@ class MarketViewBuilder:
             components={k: round(v, 3) for k, v in components.items()},
             notes=notes,
             llm=llm_view,
+            trending=trending,
+            regime_note=regime_note,
         )
 
     def _fetch_vix(self) -> float | None:
@@ -209,6 +214,18 @@ class MarketViewBuilder:
         except Exception as exc:  # noqa: BLE001
             log.warning("VIX fetch failed: %s", exc)
             return None
+
+    def _fetch_vix_history(self) -> list[float]:
+        """Trailing-year VIX daily closes for the IV percentile (cached)."""
+        if self._vix_history is None:
+            try:
+                candles = self.client.daily_candles(INDIA_VIX, "IDX_I", "INDEX",
+                                                    days=420)
+                self._vix_history = [c["close"] for c in candles]
+            except Exception as exc:  # noqa: BLE001
+                log.warning("VIX history fetch failed: %s", exc)
+                self._vix_history = []
+        return self._vix_history
 
 
 def apply_llm_view(quant_score: float, quant_confidence: float,
@@ -237,6 +254,37 @@ def apply_llm_view(quant_score: float, quant_confidence: float,
         notes.append(f"quant composite ({quant_score:+.0f}) disagrees with LLM "
                      f"({llm_score:+.0f}); confidence reduced")
     return round(score, 1), confidence, notes
+
+
+def percentile_rank(history: list[float], value: float) -> float:
+    """% of historical observations at or below `value`."""
+    if not history:
+        return 50.0
+    return 100.0 * sum(1 for v in history if v <= value) / len(history)
+
+
+def classify_vol_adaptive(current: float | None, history: list[float],
+                          signals_cfg: dict) -> tuple[str, str | None]:
+    """Vol regime via IV percentile of the trailing year (Varsity's preferred
+    read: 15 VIX is 'high' in a calm year, 'low' in a wild one). Falls back
+    to fixed thresholds when history is too short or the feature is off."""
+    if current is None:
+        return VOL_NORMAL, "no vol data; assuming NORMAL regime"
+    use_pct = bool(signals_cfg.get("use_iv_percentile", True))
+    if use_pct and len(history) >= 60:
+        pct = percentile_rank(history, current)
+        high = float(signals_cfg.get("vol_percentile_high", 75))
+        low = float(signals_cfg.get("vol_percentile_low", 25))
+        if pct >= high:
+            return VOL_HIGH, (f"vol {current:.1f} = {pct:.0f}th pctile of trailing "
+                              f"year: rich, favour premium selling")
+        if pct <= low:
+            return VOL_LOW, (f"vol {current:.1f} = {pct:.0f}th pctile of trailing "
+                             f"year: cheap, favour premium buying")
+        return VOL_NORMAL, f"vol {current:.1f} = {pct:.0f}th pctile (normal)"
+    return classify_vol(current, None,
+                        float(signals_cfg.get("vix_high", 17.0)),
+                        float(signals_cfg.get("vix_low", 12.5)))
 
 
 def classify_vol(vix: float | None, atm_iv: float | None,
