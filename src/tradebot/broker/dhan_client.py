@@ -61,7 +61,8 @@ class DhanClient:
                 resp = self.session.request(method, url, json=payload, timeout=20)
                 if resp.status_code == 429:
                     raise DhanError("rate limited")
-                resp.raise_for_status()
+                if resp.status_code >= 400:
+                    raise DhanError(f"HTTP {resp.status_code}: {resp.text[:300]}")
                 body = resp.json() if resp.text else {}
                 if isinstance(body, dict) and body.get("status") == "failed":
                     raise DhanError(f"Dhan API error on {path}: {body}")
