@@ -81,6 +81,7 @@ class Orchestrator:
                  self.settings.mode, self.settings.capital,
                  f", until {until} IST" if until else "")
         self.notifier.send(f"tradebot started: mode={self.settings.mode}")
+        self._heartbeat()
         while self._deadline is None or self.now() < self._deadline:
             try:
                 self.tick()
@@ -103,6 +104,7 @@ class Orchestrator:
         now = self.now()
         hm = self._hm(now)
         today = now.date().isoformat()
+        self._heartbeat()
 
         if not self.is_trading_day(now):
             self._sleep_until_next_session(now)
@@ -191,6 +193,7 @@ class Orchestrator:
                             "DHAN_ACCESS_TOKEN secret, then re-run the session "
                             "workflow — no trading until then.")
                         self._auth_alerted = now.date().isoformat()
+                        self._heartbeat("/fail")
                 continue
             self.journal.record_signal(underlying.name, {
                 "score": view.direction_score, "direction": view.direction,
@@ -308,6 +311,27 @@ class Orchestrator:
                          f"x{leg.quantity}: ₹{tm:,.0f}")
         return total, " | ".join(parts)
 
+    def _heartbeat(self, suffix: str = "") -> None:
+        """Dead-man's-switch ping (healthchecks.io style). The external
+        monitor alerts the owner when pings STOP — covering every failure
+        layer above us (scheduler, runner, crash). suffix '/fail' signals an
+        explicit unhealthy state. No-op unless HEALTHCHECK_URL is set."""
+        import os
+        import time as _t
+        url = os.environ.get("HEALTHCHECK_URL", "").rstrip("/")
+        if not url:
+            return
+        now = _t.monotonic()
+        if suffix == "" and now - getattr(self, "_last_ping", 0.0) < 300:
+            return  # throttle OK-pings to one per 5 minutes
+        try:
+            import requests as _rq
+            _rq.get(url + suffix, timeout=10)
+            if suffix == "":
+                self._last_ping = now
+        except Exception as exc:  # noqa: BLE001
+            log.warning("heartbeat ping failed: %s", exc)
+
     def _monitor_positions(self) -> None:
         if not self.journal.open_trade_count():
             return
@@ -322,6 +346,7 @@ class Orchestrator:
         pnl = self.journal.realized_pnl_today()
         self.notifier.send(f"EOD {today}: day P&L ₹{pnl:,.0f} | report: {path.name}")
         self._eod_done = today
+        self._heartbeat()
 
     # ------------------------------------------------------------ helpers
     def _is_intraday(self) -> bool:
