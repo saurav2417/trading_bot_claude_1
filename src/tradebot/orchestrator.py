@@ -51,6 +51,7 @@ class Orchestrator:
         self._eod_done: str = ""
         self._last_scan: datetime | None = None
         self._event_skip_notified: str = ""
+        self._auth_alerted: str = ""
 
     # ----------------------------------------------------------- schedule
     def _t(self, key: str, default: str) -> str:
@@ -180,6 +181,16 @@ class Orchestrator:
                 view = self.view_builder.build(underlying)
             except Exception as exc:  # noqa: BLE001
                 log.warning("view build failed for %s: %s", underlying.name, exc)
+                # auth failures must be LOUD: silent scans all day = lost day
+                if ("DH-901" in str(exc) or "Invalid_Authentication" in str(exc)
+                        or "401" in str(exc)):
+                    if self._auth_alerted != now.date().isoformat():
+                        self.notifier.send(
+                            "⚠️ Dhan access token invalid/expired (DH-901). "
+                            "Regenerate it on dhanhq.co, update the "
+                            "DHAN_ACCESS_TOKEN secret, then re-run the session "
+                            "workflow — no trading until then.")
+                        self._auth_alerted = now.date().isoformat()
                 continue
             self.journal.record_signal(underlying.name, {
                 "score": view.direction_score, "direction": view.direction,
