@@ -37,8 +37,28 @@ hrc-transport-seo/
 │   ├── send-goods-india-to-bhutan-guide.md
 │   └── ftl-vs-ptl-which-to-choose.md
 ├── schema/localbusiness.jsonld  ← site-wide structured data
-└── site-preview/index.html      ← modern homepage design you can preview in a browser
+├── site-preview/index.html      ← modern homepage design you can preview in a browser
+└── deploy/
+    ├── publish.py           ← one-command publishing via WordPress REST API (drafts by default)
+    └── placeholders.json    ← fill real phone/address/email here before deploying
 ```
+
+## Automated deployment (instead of manual pasting)
+
+With a WordPress **application password** (Users → Profile → Application Passwords) and network access
+to the site, the whole package deploys in one command:
+
+```bash
+cd hrc-transport-seo/deploy
+# 1. edit placeholders.json with real values (script refuses to run otherwise)
+export WP_URL="https://hrctransport.com" WP_USER="<wp-username>" WP_APP_PASSWORD="xxxx xxxx ..."
+python3 publish.py --dry-run   # preview
+python3 publish.py             # creates everything as DRAFTS
+python3 publish.py --live      # publishes live
+```
+
+Idempotent (re-runs update rather than duplicate). Never commit credentials to this repo, and
+**revoke/rotate any application password that has been shared in chat** once deployment is done.
 
 ## Implementation checklist (in priority order)
 
